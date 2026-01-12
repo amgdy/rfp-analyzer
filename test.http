@@ -1,0 +1,19 @@
+@access_token = 5d9d028c32a14600b864a77099a7fff2
+
+GET https://shld-aoai-aihub-swc-01.services.ai.azure.com/contentunderstanding/defaults?api-version=2025-11-01
+Authorization: Bearer {{access_token}}
+Content-Type: application/json
+
+
+### Update the defaults
+
+PATCH https://shld-aoai-aihub-swc-01.services.ai.azure.com/contentunderstanding/defaults?api-version=2025-11-01
+Authorization: Bearer {{access_token}}
+Content-Type: application/json
+
+{
+  "modelDeployments": {
+    "gpt-4.1": "gpt-4.1",
+    "text-embedding-3-large": "text-embedding-3-large"
+  }
+}

@@ -7,14 +7,26 @@ against RFP requirements and provides detailed scoring.
 
 import os
 import json
+import logging
+import time
+from datetime import datetime
 from typing import Annotated
 
-from agent_framework.azure import AzureOpenAIChatClient
+from openai import AzureOpenAI
+from agent_framework.azure import AzureOpenAIChatClient,AzureOpenAIResponsesClient
 from azure.identity import DefaultAzureCredential
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s.%(msecs)03d | %(levelname)s | %(name)s | %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
 
 
 class RequirementScore(BaseModel):
@@ -86,20 +98,42 @@ class ScoringAgent:
     """
     AI Agent for evaluating vendor proposals against RFP requirements.
     
-    Uses Microsoft Agent Framework with Azure OpenAI to perform intelligent
-    analysis and scoring of vendor proposals.
+    Uses Azure OpenAI with o1/o3 reasoning models to perform intelligent
+    analysis and scoring of vendor proposals with deep reasoning capabilities.
     """
     
     def __init__(self):
-        """Initialize the scoring agent with Azure OpenAI."""
+        """Initialize the scoring agent with Azure OpenAI reasoning model."""
+        logger.info("[%s] Initializing ScoringAgent...", datetime.now().isoformat())
+        init_start = time.time()
+        
         # Validate required environment variables
         self._validate_config()
+
+        endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+        deployment_name = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME")
         
-        # Create the Azure OpenAI chat client
-        self.chat_client = AzureOpenAIChatClient(
+        # Create the Azure OpenAI client for reasoning models (o1/o3)
+        self.client = AzureOpenAIResponsesClient(
             credential=DefaultAzureCredential(),
-            endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-            deployment_name=os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME"),
+            endpoint=endpoint,
+            deployment_name=deployment_name,
+            api_version="v1"
+        )
+        
+        # Deployment name for the reasoning model (o3 or o1)
+        self.deployment_name = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME")
+        
+        init_duration = time.time() - init_start
+        logger.info("[%s] ScoringAgent initialized successfully in %.2fs", 
+                   datetime.now().isoformat(), init_duration)
+    
+    def _get_token_provider(self):
+        """Get Azure AD token provider for authentication."""
+        from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+        credential = DefaultAzureCredential()
+        return get_bearer_token_provider(
+            credential, "https://cognitiveservices.azure.com/.default"
         )
     
     def _validate_config(self):
@@ -121,37 +155,100 @@ class ScoringAgent:
         self, 
         rfp_content: str, 
         proposal_content: str, 
-        scoring_guide: str = ""
+        scoring_guide: str = "",
+        progress_callback=None
     ) -> dict:
         """
-        Evaluate a vendor proposal against RFP requirements.
+        Evaluate a vendor proposal against RFP requirements using Azure OpenAI reasoning model.
         
         Args:
             rfp_content: The RFP document content in markdown
             proposal_content: The vendor proposal content in markdown
             scoring_guide: Optional scoring guide/criteria in markdown
+            progress_callback: Optional callback function for progress updates
             
         Returns:
-            Dictionary containing evaluation results
+            Dictionary containing evaluation results with timing metadata
         """
+        evaluate_start = time.time()
+        logger.info("[%s] Starting proposal evaluation...", datetime.now().isoformat())
+        logger.info("[%s] RFP content length: %d chars", datetime.now().isoformat(), len(rfp_content))
+        logger.info("[%s] Proposal content length: %d chars", datetime.now().isoformat(), len(proposal_content))
+        
         # Use default guide if none provided
         if not scoring_guide:
             scoring_guide = DEFAULT_SCORING_GUIDE
+            logger.info("[%s] Using default scoring guide", datetime.now().isoformat())
+        else:
+            logger.info("[%s] Using custom scoring guide (%d chars)", datetime.now().isoformat(), len(scoring_guide))
         
-        # Create the evaluation agent
-        agent = self.chat_client.create_agent(
-            name="RFPEvaluationAgent",
-            instructions=self._get_system_instructions(scoring_guide),
-        )
+        # Prepare the system instructions and user prompt
+        system_instructions = self._get_system_instructions(scoring_guide)
+        user_prompt = self._create_evaluation_prompt(rfp_content, proposal_content)
         
-        # Prepare the evaluation prompt
-        prompt = self._create_evaluation_prompt(rfp_content, proposal_content)
+        logger.info("[%s] Sending request to Azure OpenAI reasoning model (deployment: %s)...", 
+                   datetime.now().isoformat(), self.deployment_name)
         
-        # Run the agent
-        result = await agent.run(prompt)
+        if progress_callback:
+            progress_callback("Initializing AI reasoning engine...")
+        
+        # Call the reasoning model with highest reasoning effort
+        api_start = time.time()
+        try:
+            agent = self.client.create_agent(
+                instructions=system_instructions,
+                name="RFP Scoring Agent",
+
+                additional_chat_options={"reasoning": {"effort": "high", "summary": "detailed"}}
+            )
+            agent_result = await agent.run(user_prompt)
+
+            api_duration = time.time() - api_start
+            logger.info("[%s] Azure OpenAI API call completed in %.2fs", 
+                       datetime.now().isoformat(), api_duration)
+            
+            # Log token usage from AgentRunResponse.usage_details
+            usage = agent_result.usage_details
+            if usage:
+                input_tokens = usage.input_token_count or 0
+                output_tokens = usage.output_token_count or 0
+                total_tokens = usage.total_token_count or (input_tokens + output_tokens)
+                logger.info("[%s] Token usage - Input: %d, Output: %d, Total: %d",
+                           datetime.now().isoformat(),
+                           input_tokens,
+                           output_tokens,
+                           total_tokens)
+            
+            # AgentRunResponse.text concatenates all message text
+            response_text = agent_result.text
+            logger.info("[%s] Response received (%d chars)", datetime.now().isoformat(), len(response_text))
+            
+        except Exception as e:
+            logger.error("[%s] Azure OpenAI API call failed: %s", datetime.now().isoformat(), str(e))
+            raise
         
         # Parse the response
-        return self._parse_response(result.text)
+        parse_start = time.time()
+        logger.info("[%s] Parsing evaluation response...", datetime.now().isoformat())
+        result = self._parse_response(response_text)
+        parse_duration = time.time() - parse_start
+        logger.info("[%s] Response parsed in %.2fs", datetime.now().isoformat(), parse_duration)
+        
+        # Add timing metadata to result
+        total_duration = time.time() - evaluate_start
+        result["_metadata"] = {
+            "evaluation_timestamp": datetime.now().isoformat(),
+            "total_duration_seconds": round(total_duration, 2),
+            "api_call_duration_seconds": round(api_duration, 2),
+            "parse_duration_seconds": round(parse_duration, 2),
+            "model_deployment": self.deployment_name,
+            "reasoning_effort": "high"
+        }
+        
+        logger.info("[%s] Evaluation completed successfully in %.2fs", 
+                   datetime.now().isoformat(), total_duration)
+        
+        return result
     
     def _get_system_instructions(self, scoring_guide: str) -> str:
         """Get system instructions for the evaluation agent."""
