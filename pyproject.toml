@@ -1,0 +1,20 @@
+[project]
+name = "rfp-analyzer"
+version = "0.1.0"
+description = "RFP Analyzer using Azure Content Understanding and Microsoft Agent Framework"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "streamlit>=1.40.0",
+    "agent-framework",
+    "azure-identity>=1.19.0",
+    "azure-ai-documentintelligence>=1.0.0",
+    "python-dotenv>=1.0.1",
+    "pydantic>=2.10.0",
+    "openai>=1.0.0",
+    "requests>=2.32.5",
+    "azure-monitor-opentelemetry>=1.8.3",
+]
+
+[tool.uv]
+prerelease = "allow"
