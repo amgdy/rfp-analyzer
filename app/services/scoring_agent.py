@@ -156,7 +156,8 @@ class ScoringAgent:
         rfp_content: str, 
         proposal_content: str, 
         scoring_guide: str = "",
-        progress_callback=None
+        progress_callback=None,
+        reasoning_effort: str = "high"
     ) -> dict:
         """
         Evaluate a vendor proposal against RFP requirements using Azure OpenAI reasoning model.
@@ -166,12 +167,13 @@ class ScoringAgent:
             proposal_content: The vendor proposal content in markdown
             scoring_guide: Optional scoring guide/criteria in markdown
             progress_callback: Optional callback function for progress updates
+            reasoning_effort: Reasoning effort level ("low", "medium", "high")
             
         Returns:
             Dictionary containing evaluation results with timing metadata
         """
         evaluate_start = time.time()
-        logger.info("[%s] Starting proposal evaluation...", datetime.now().isoformat())
+        logger.info("[%s] Starting proposal evaluation (effort: %s)...", datetime.now().isoformat(), reasoning_effort)
         logger.info("[%s] RFP content length: %d chars", datetime.now().isoformat(), len(rfp_content))
         logger.info("[%s] Proposal content length: %d chars", datetime.now().isoformat(), len(proposal_content))
         
@@ -186,20 +188,20 @@ class ScoringAgent:
         system_instructions = self._get_system_instructions(scoring_guide)
         user_prompt = self._create_evaluation_prompt(rfp_content, proposal_content)
         
-        logger.info("[%s] Sending request to Azure OpenAI reasoning model (deployment: %s)...", 
-                   datetime.now().isoformat(), self.deployment_name)
+        logger.info("[%s] Sending request to Azure OpenAI reasoning model (deployment: %s, effort: %s)...", 
+                   datetime.now().isoformat(), self.deployment_name, reasoning_effort)
         
         if progress_callback:
             progress_callback("Initializing AI reasoning engine...")
         
-        # Call the reasoning model with highest reasoning effort
+        # Call the reasoning model with specified reasoning effort
         api_start = time.time()
         try:
             agent = self.client.create_agent(
                 instructions=system_instructions,
                 name="RFP Scoring Agent",
 
-                additional_chat_options={"reasoning": {"effort": "high", "summary": "detailed"}}
+                additional_chat_options={"reasoning": {"effort": reasoning_effort, "summary": "detailed"}}
             )
             agent_result = await agent.run(user_prompt)
 
@@ -242,7 +244,7 @@ class ScoringAgent:
             "api_call_duration_seconds": round(api_duration, 2),
             "parse_duration_seconds": round(parse_duration, 2),
             "model_deployment": self.deployment_name,
-            "reasoning_effort": "high"
+            "reasoning_effort": reasoning_effort
         }
         
         logger.info("[%s] Evaluation completed successfully in %.2fs", 
