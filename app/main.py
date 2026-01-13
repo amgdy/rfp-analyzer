@@ -17,6 +17,7 @@ from datetime import datetime
 
 from services.document_processor import DocumentProcessor
 from services.scoring_agent import ScoringAgent
+from services.scoring_agent_v2 import ScoringAgentV2
 
 # Optional PDF support
 try:
@@ -188,6 +189,10 @@ if "scoring_results" not in st.session_state:
     st.session_state.scoring_results = None
 if "step_durations" not in st.session_state:
     st.session_state.step_durations = {}
+if "scoring_version" not in st.session_state:
+    st.session_state.scoring_version = "v1"
+if "reasoning_effort" not in st.session_state:
+    st.session_state.reasoning_effort = "high"
 
 
 # Animation CSS for step indicators
@@ -277,17 +282,28 @@ async def process_document(file_bytes: bytes, filename: str) -> tuple[str, float
     return content, duration
 
 
-async def evaluate_proposal(rfp_content: str, proposal_content: str, scoring_guide: str) -> tuple[dict, float]:
+async def evaluate_proposal(rfp_content: str, proposal_content: str, scoring_guide: str, version: str = "v1", reasoning_effort: str = "high") -> tuple[dict, float]:
     """Evaluate the vendor proposal against the RFP using AI agent.
+    
+    Args:
+        rfp_content: The RFP content
+        proposal_content: The proposal content
+        scoring_guide: The scoring guide (used in v1 only)
+        version: Scoring version ("v1" or "v2")
+        reasoning_effort: Reasoning effort level ("low", "medium", "high")
     
     Returns:
         Tuple of (results, duration_seconds)
     """
     start_time = time.time()
-    logger.info("[%s] Starting proposal evaluation...", datetime.now().isoformat())
+    logger.info("[%s] Starting proposal evaluation (version: %s, effort: %s)...", datetime.now().isoformat(), version, reasoning_effort)
     
-    agent = ScoringAgent()
-    results = await agent.evaluate(rfp_content, proposal_content, scoring_guide)
+    if version == "v2":
+        agent = ScoringAgentV2()
+        results = await agent.evaluate(rfp_content, proposal_content, reasoning_effort=reasoning_effort)
+    else:
+        agent = ScoringAgent()
+        results = await agent.evaluate(rfp_content, proposal_content, scoring_guide, reasoning_effort=reasoning_effort)
     
     duration = time.time() - start_time
     logger.info("[%s] Evaluation completed in %.2fs", datetime.now().isoformat(), duration)
@@ -301,7 +317,52 @@ def render_sidebar():
         st.title("📄 RFP Analyzer")
         st.markdown("---")
         
+        # Scoring Mode Section (at the top)
+        st.subheader("⚙️ Scoring Mode")
+        
+        # Scoring Version Selection
+        version = st.radio(
+            "Select scoring version:",
+            options=["v1", "v2"],
+            index=0 if st.session_state.scoring_version == "v1" else 1,
+            format_func=lambda x: "V1 - Single Agent" if x == "v1" else "V2 - Multi-Agent",
+            help="V1: Uses predefined scoring guide. V2: Extracts criteria from RFP automatically."
+        )
+        if version != st.session_state.scoring_version:
+            st.session_state.scoring_version = version
+            st.session_state.scoring_results = None  # Reset results when version changes
+            st.rerun()
+        
+        # Show version description
+        if st.session_state.scoring_version == "v1":
+            st.caption("📋 Uses predefined scoring criteria from the scoring guide.")
+        else:
+            st.caption("🤖 Multi-agent: Extracts criteria from RFP, then scores the proposal.")
+        
+        st.markdown("")
+        
+        # Reasoning Effort Selection
+        reasoning_options = {
+            "low": "Low (~5 mins)",
+            "medium": "Medium (~10 mins)",
+            "high": "High (~15 mins)"
+        }
+        effort = st.radio(
+            "Reasoning effort:",
+            options=["low", "medium", "high"],
+            index=["low", "medium", "high"].index(st.session_state.reasoning_effort),
+            format_func=lambda x: reasoning_options[x],
+            help="Higher effort = deeper analysis but longer processing time."
+        )
+        if effort != st.session_state.reasoning_effort:
+            st.session_state.reasoning_effort = effort
+            st.session_state.scoring_results = None  # Reset results when effort changes
+            st.rerun()
+        
+        st.markdown("---")
+        
         # Step indicators
+        st.subheader("📍 Progress")
         steps = [
             ("1️⃣", "Upload RFP", st.session_state.step >= 1),
             ("2️⃣", "Upload Proposal", st.session_state.step >= 2),
@@ -324,6 +385,8 @@ def render_sidebar():
             st.session_state.rfp_content = None
             st.session_state.proposal_content = None
             st.session_state.scoring_results = None
+            st.session_state.scoring_version = "v1"
+            st.session_state.reasoning_effort = "high"
             st.rerun()
         
         st.markdown("---")
@@ -400,7 +463,8 @@ def render_step2():
 
 def render_step3():
     """Step 3: Evaluate and Score."""
-    st.header("Step 3: Evaluate & Score")
+    version_label = "Multi-Agent (V2)" if st.session_state.scoring_version == "v2" else "Single Agent (V1)"
+    st.header(f"Step 3: Evaluate & Score ({version_label})")
     st.markdown("Processing documents and analyzing the vendor proposal against RFP requirements.")
     
     # Show uploaded files summary
@@ -412,13 +476,27 @@ def render_step3():
         if st.session_state.proposal_file:
             st.info(f"📝 Proposal: {st.session_state.proposal_file['name']}")
     
-    # Scoring guide
+    # Scoring guide (v1) or criteria extraction info (v2)
     scoring_guide = get_scoring_guide()
-    with st.expander("📊 Scoring Guide", expanded=False):
-        if scoring_guide:
-            st.markdown(scoring_guide)
-        else:
-            st.warning("No scoring guide found. Using default evaluation criteria.")
+    if st.session_state.scoring_version == "v1":
+        with st.expander("📊 Scoring Guide (V1)", expanded=False):
+            if scoring_guide:
+                st.markdown(scoring_guide)
+            else:
+                st.warning("No scoring guide found. Using default evaluation criteria.")
+    else:
+        with st.expander("🤖 Multi-Agent Scoring (V2)", expanded=False):
+            st.info("""
+            **V2 Multi-Agent Scoring Process:**
+            
+            1. **Agent 1 - Criteria Extraction**: Analyzes the RFP document to automatically 
+               extract scoring criteria with weights (totaling 100%).
+            
+            2. **Agent 2 - Proposal Scoring**: Evaluates the vendor proposal against the 
+               extracted criteria, providing detailed scores and justifications.
+            
+            This approach ensures that scoring is tailored to each specific RFP's requirements.
+            """)
     
     # Process and evaluate
     if st.session_state.scoring_results is None:
@@ -427,7 +505,10 @@ def render_step3():
     
     # Display results
     if st.session_state.scoring_results:
-        render_results(st.session_state.scoring_results)
+        if st.session_state.scoring_version == "v2":
+            render_results_v2(st.session_state.scoring_results)
+        else:
+            render_results(st.session_state.scoring_results)
         
         # Show processed content
         st.markdown("---")
@@ -530,28 +611,43 @@ def run_evaluation_pipeline(scoring_guide: str):
             
             # Step 3: Scoring with AI Reasoning
             step3_start = time.time()
-            logger.info("[%s] STEP 3: AI Reasoning & Scoring (using high reasoning effort)...", datetime.now().isoformat())
+            scoring_version = st.session_state.scoring_version
             
-            step3_container.markdown("""
-                <div class="processing-container">
-                    <span class="spinner"></span>
-                    <strong>3. AI Reasoning & Scoring...</strong>
-                    <span class="duration-badge">🧠 Deep analysis in progress...</span>
-                </div>
-            """, unsafe_allow_html=True)
-            status_text.text("🧠 AI Agent is performing deep reasoning analysis (this may take a moment)...")
+            if scoring_version == "v2":
+                logger.info("[%s] STEP 3: Multi-Agent Scoring (V2)...", datetime.now().isoformat())
+                step3_container.markdown("""
+                    <div class="processing-container">
+                        <span class="spinner"></span>
+                        <strong>3. Multi-Agent Scoring (V2)...</strong>
+                        <span class="duration-badge">🤖 Extracting criteria & scoring...</span>
+                    </div>
+                """, unsafe_allow_html=True)
+                status_text.text("🤖 Agent 1: Extracting scoring criteria from RFP...")
+            else:
+                logger.info("[%s] STEP 3: AI Reasoning & Scoring (V1)...", datetime.now().isoformat())
+                step3_container.markdown("""
+                    <div class="processing-container">
+                        <span class="spinner"></span>
+                        <strong>3. AI Reasoning & Scoring (V1)...</strong>
+                        <span class="duration-badge">🧠 Deep analysis in progress...</span>
+                    </div>
+                """, unsafe_allow_html=True)
+                status_text.text("🧠 AI Agent is performing deep reasoning analysis (this may take a moment)...")
             
             results, scoring_duration = asyncio.run(
                 evaluate_proposal(
                     st.session_state.rfp_content,
                     st.session_state.proposal_content,
-                    scoring_guide
+                    scoring_guide,
+                    version=scoring_version,
+                    reasoning_effort=st.session_state.reasoning_effort
                 )
             )
             st.session_state.scoring_results = results
             st.session_state.step_durations["scoring"] = scoring_duration
             
-            step3_container.markdown(f"✅ **3. AI Reasoning & Scoring... Done!** `{format_duration(scoring_duration)}`")
+            version_label = "V2" if scoring_version == "v2" else "V1"
+            step3_container.markdown(f"✅ **3. AI Scoring ({version_label})... Done!** `{format_duration(scoring_duration)}`")
             logger.info("[%s] STEP 3 completed in %.2fs", datetime.now().isoformat(), scoring_duration)
             progress_bar.progress(100)
             
@@ -658,6 +754,469 @@ def render_results(results: dict):
                 use_container_width=True,
                 help="Install 'weasyprint' and 'markdown' packages to enable PDF export"
             )
+
+
+def render_results_v2(results: dict):
+    """Render the V2 multi-agent evaluation results."""
+    st.markdown("---")
+    
+    # Display timing information if available
+    if st.session_state.step_durations:
+        render_timing_summary_v2(st.session_state.step_durations, results)
+    
+    # Quick score summary
+    render_score_summary_v2(results)
+    
+    # Generate and display the markdown report
+    report_md = generate_score_report_v2(results)
+    
+    # Display report in tabs
+    tab1, tab2, tab3 = st.tabs(["📊 Score Report", "📋 Extracted Criteria", "📄 Raw Data"])
+    
+    with tab1:
+        st.markdown(report_md)
+    
+    with tab2:
+        render_extracted_criteria(results)
+    
+    with tab3:
+        st.json(results)
+    
+    # Download buttons
+    st.markdown("---")
+    st.subheader("📥 Download Report")
+    
+    response_id = results.get('response_id', 'report')
+    supplier_name = results.get('supplier_name', 'vendor').replace(' ', '_')
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.download_button(
+            label="📄 Download Markdown",
+            data=report_md,
+            file_name=f"rfp_score_report_v2_{response_id}.md",
+            mime="text/markdown",
+            use_container_width=True
+        )
+    
+    with col2:
+        import json
+        st.download_button(
+            label="📋 Download JSON",
+            data=json.dumps(results, indent=2),
+            file_name=f"rfp_score_report_v2_{response_id}.json",
+            mime="application/json",
+            use_container_width=True
+        )
+    
+    with col3:
+        if PDF_AVAILABLE and MARKDOWN_AVAILABLE:
+            pdf_data = generate_pdf_from_markdown(report_md, title=f"RFP Score Report V2 - {supplier_name}")
+            if pdf_data:
+                st.download_button(
+                    label="📑 Download PDF",
+                    data=pdf_data,
+                    file_name=f"rfp_score_report_v2_{response_id}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True
+                )
+            else:
+                st.button("📑 PDF Generation Failed", disabled=True, use_container_width=True)
+        else:
+            st.button("📑 PDF Not Available", disabled=True, use_container_width=True)
+
+
+def render_timing_summary_v2(durations: dict, results: dict):
+    """Render timing summary for V2 multi-agent evaluation."""
+    st.subheader("⏱️ Multi-Agent Evaluation Timing")
+    
+    metadata = results.get("_metadata", {})
+    
+    col1, col2, col3, col4, col5 = st.columns(5)
+    
+    with col1:
+        rfp_time = durations.get("rfp_processing", 0)
+        st.metric(label="📄 RFP Processing", value=format_duration(rfp_time))
+    
+    with col2:
+        proposal_time = durations.get("proposal_processing", 0)
+        st.metric(label="📝 Proposal Processing", value=format_duration(proposal_time))
+    
+    with col3:
+        phase1_time = metadata.get("phase1_criteria_extraction_seconds", 0)
+        st.metric(label="🔍 Criteria Extraction", value=format_duration(phase1_time))
+    
+    with col4:
+        phase2_time = metadata.get("phase2_proposal_scoring_seconds", 0)
+        st.metric(label="📊 Proposal Scoring", value=format_duration(phase2_time))
+    
+    with col5:
+        total_time = durations.get("total", 0)
+        st.metric(label="⏱️ Total Time", value=format_duration(total_time))
+    
+    if metadata:
+        with st.expander("🔍 Detailed Timing & Model Info", expanded=False):
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown(f"""
+                **Evaluation Details:**
+                - Version: `{metadata.get('version', 'N/A')}`
+                - Type: `{metadata.get('evaluation_type', 'N/A')}`
+                - Timestamp: `{metadata.get('evaluation_timestamp', 'N/A')}`
+                - Model: `{metadata.get('model_deployment', 'N/A')}`
+                """)
+            with col2:
+                st.markdown(f"""
+                **Multi-Agent Timing:**
+                - Criteria Extraction: `{format_duration(metadata.get('phase1_criteria_extraction_seconds', 0))}`
+                - Proposal Scoring: `{format_duration(metadata.get('phase2_proposal_scoring_seconds', 0))}`
+                - Criteria Found: `{metadata.get('criteria_count', 0)}`
+                """)
+    
+    st.markdown("---")
+
+
+def render_score_summary_v2(results: dict):
+    """Render a visual score summary header for V2."""
+    total_score = results.get("total_score", 0)
+    grade = results.get("grade", "N/A")
+    supplier_name = results.get("supplier_name", "Unknown Vendor")
+    recommendation = results.get("recommendation", "No recommendation")
+    criteria_count = results.get("_metadata", {}).get("criteria_count", 0)
+    
+    # Grade color mapping
+    grade_colors = {"A": "green", "B": "blue", "C": "orange", "D": "red", "F": "red"}
+    grade_color = grade_colors.get(grade, "gray")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric(label="Supplier", value=supplier_name[:20] + "..." if len(supplier_name) > 20 else supplier_name)
+    
+    with col2:
+        st.metric(label="Total Score", value=f"{total_score:.1f}/100", help="Weighted sum of all criterion scores")
+    
+    with col3:
+        st.metric(label="Criteria Evaluated", value=str(criteria_count))
+    
+    with col4:
+        st.markdown(f"""
+            <div style="text-align: center; padding: 10px;">
+                <p style="font-size: 14px; color: gray; margin: 0;">Grade</p>
+                <p style="font-size: 32px; font-weight: bold; color: {grade_color}; margin: 5px 0;">{grade}</p>
+            </div>
+        """, unsafe_allow_html=True)
+    
+    # Recommendation banner
+    if "recommend" in recommendation.lower() and "not" not in recommendation.lower():
+        st.success(f"✅ **Recommendation:** {recommendation}")
+    elif "not recommend" in recommendation.lower():
+        st.error(f"❌ **Recommendation:** {recommendation}")
+    else:
+        st.info(f"ℹ️ **Recommendation:** {recommendation}")
+    
+    st.markdown("---")
+
+
+def render_extracted_criteria(results: dict):
+    """Render the extracted criteria from the RFP."""
+    extracted = results.get("extracted_criteria", {})
+    criteria = extracted.get("criteria", [])
+    
+    st.subheader("🔍 Criteria Extracted from RFP")
+    
+    if extracted.get("rfp_summary"):
+        st.info(f"**RFP Summary:** {extracted.get('rfp_summary')}")
+    
+    if criteria:
+        st.markdown(f"**Total Criteria:** {len(criteria)} | **Total Weight:** {extracted.get('total_weight', 100)}%")
+        
+        # Display as a table
+        criteria_data = []
+        for c in criteria:
+            criteria_data.append({
+                "ID": c.get("criterion_id", ""),
+                "Name": c.get("name", ""),
+                "Category": c.get("category", ""),
+                "Weight": f"{c.get('weight', 0):.1f}%",
+                "Description": c.get("description", "")[:100] + "..." if len(c.get("description", "")) > 100 else c.get("description", "")
+            })
+        
+        st.dataframe(criteria_data, use_container_width=True)
+        
+        # Detailed view in expander
+        with st.expander("📋 Detailed Criteria Descriptions", expanded=False):
+            for c in criteria:
+                st.markdown(f"""
+                ### {c.get('criterion_id', '')}. {c.get('name', '')} ({c.get('weight', 0):.1f}%)
+                
+                **Category:** {c.get('category', 'N/A')}
+                
+                **Description:** {c.get('description', 'N/A')}
+                
+                **Evaluation Guidance:** {c.get('evaluation_guidance', 'N/A')}
+                
+                ---
+                """)
+    else:
+        st.warning("No criteria extracted.")
+    
+    if extracted.get("extraction_notes"):
+        st.caption(f"**Notes:** {extracted.get('extraction_notes')}")
+
+
+def generate_score_report_v2(results: dict) -> str:
+    """Generate a comprehensive markdown score report for V2."""
+    
+    # Extract data
+    rfp_title = results.get("rfp_title", "RFP Evaluation")
+    supplier_name = results.get("supplier_name", "Unknown Vendor")
+    supplier_site = results.get("supplier_site", "N/A")
+    response_id = results.get("response_id", "N/A")
+    evaluation_date = results.get("evaluation_date", "N/A")
+    total_score = results.get("total_score", 0)
+    grade = results.get("grade", "N/A")
+    recommendation = results.get("recommendation", "N/A")
+    
+    extracted = results.get("extracted_criteria", {})
+    criterion_scores = results.get("criterion_scores", [])
+    
+    executive_summary = results.get("executive_summary", "")
+    overall_strengths = results.get("overall_strengths", [])
+    overall_weaknesses = results.get("overall_weaknesses", [])
+    recommendations = results.get("recommendations", [])
+    risk_assessment = results.get("risk_assessment", "")
+    
+    # Grade badge
+    grade_badges = {
+        "A": "🟢 **EXCELLENT**",
+        "B": "🔵 **GOOD**",
+        "C": "🟡 **ACCEPTABLE**",
+        "D": "🟠 **BELOW AVERAGE**",
+        "F": "🔴 **POOR**"
+    }
+    grade_badge = grade_badges.get(grade, "⚪ **UNKNOWN**")
+    
+    # Build the report
+    report = f"""# 📊 RFP Evaluation Report (V2 - Multi-Agent)
+
+---
+
+## 📋 Evaluation Summary
+
+| Field | Value |
+|-------|-------|
+| **RFP Title** | {rfp_title} |
+| **Response ID** | {response_id} |
+| **Supplier** | {supplier_name} |
+| **Supplier Site** | {supplier_site} |
+| **Evaluation Date** | {evaluation_date} |
+| **Scoring Version** | V2 (Multi-Agent) |
+
+---
+
+## 🎯 Score Overview
+
+| Metric | Value |
+|--------|-------|
+| **Total Score** | **{total_score:.2f}** / 100 |
+| **Grade** | {grade_badge} |
+| **Criteria Evaluated** | {len(criterion_scores)} |
+
+### Recommendation
+
+{recommendation}
+
+---
+
+## 🔍 Extracted Criteria Summary
+
+**RFP Summary:** {extracted.get('rfp_summary', 'N/A')}
+
+**Criteria Count:** {extracted.get('criteria_count', len(extracted.get('criteria', [])))}
+
+| ID | Criterion | Category | Weight |
+|----|-----------|----------|--------|
+"""
+    
+    # Add criteria summary
+    for c in extracted.get("criteria", []):
+        report += f"| {c.get('criterion_id', '')} | {c.get('name', '')} | {c.get('category', '')} | {c.get('weight', 0):.1f}% |\n"
+    
+    report += """
+---
+
+## 📈 Detailed Scoring Results
+
+| Criterion | Weight | Raw Score | Weighted Score |
+|-----------|--------|-----------|----------------|
+"""
+    
+    # Add score rows
+    for cs in criterion_scores:
+        raw = cs.get("raw_score", 0)
+        weighted = cs.get("weighted_score", 0)
+        name = cs.get("criterion_name", cs.get("criterion_id", ""))
+        weight = cs.get("weight", 0)
+        
+        # Score indicator
+        if raw >= 80:
+            indicator = "🟢"
+        elif raw >= 60:
+            indicator = "🟡"
+        elif raw >= 40:
+            indicator = "🟠"
+        else:
+            indicator = "🔴"
+        
+        report += f"| {indicator} {name} | {weight:.1f}% | {raw:.1f} | **{weighted:.2f}** |\n"
+    
+    # Add total row
+    total_weighted = sum(cs.get("weighted_score", 0) for cs in criterion_scores)
+    report += f"| **TOTAL** | **100%** | - | **{total_weighted:.2f}** |\n"
+    
+    report += """
+---
+
+## 📝 Criterion-by-Criterion Analysis
+
+"""
+    
+    # Detailed analysis for each criterion
+    for cs in criterion_scores:
+        criterion_id = cs.get("criterion_id", "")
+        criterion_name = cs.get("criterion_name", "")
+        raw_score = cs.get("raw_score", 0)
+        weighted_score = cs.get("weighted_score", 0)
+        weight = cs.get("weight", 0)
+        evidence = cs.get("evidence", "No evidence provided")
+        justification = cs.get("justification", "No justification provided")
+        strengths = cs.get("strengths", [])
+        gaps = cs.get("gaps", [])
+        
+        # Score indicator
+        if raw_score >= 80:
+            indicator = "🟢"
+        elif raw_score >= 60:
+            indicator = "🟡"
+        elif raw_score >= 40:
+            indicator = "🟠"
+        else:
+            indicator = "🔴"
+        
+        report += f"""### {indicator} {criterion_id}. {criterion_name}
+
+| Metric | Value |
+|--------|-------|
+| Raw Score | **{raw_score:.1f}** / 100 |
+| Weight | {weight:.1f}% |
+| Weighted Score | **{weighted_score:.2f}** |
+
+**Evidence from Proposal:**
+> {evidence}
+
+**Justification:**
+{justification}
+
+"""
+        
+        if strengths:
+            report += "**Strengths:**\n"
+            for s in strengths:
+                report += f"- ✅ {s}\n"
+            report += "\n"
+        
+        if gaps:
+            report += "**Gaps/Weaknesses:**\n"
+            for g in gaps:
+                report += f"- ⚠️ {g}\n"
+            report += "\n"
+        
+        report += "---\n\n"
+    
+    # Overall Analysis
+    report += """## 💡 Overall Analysis
+
+### Key Strengths
+"""
+    if overall_strengths:
+        for s in overall_strengths:
+            report += f"- ✅ {s}\n"
+    else:
+        report += "- No specific strengths identified\n"
+    
+    report += """
+### Key Weaknesses
+"""
+    if overall_weaknesses:
+        for w in overall_weaknesses:
+            report += f"- ⚠️ {w}\n"
+    else:
+        report += "- No significant weaknesses identified\n"
+    
+    report += """
+### Recommendations
+"""
+    if recommendations:
+        for i, r in enumerate(recommendations, 1):
+            report += f"{i}. {r}\n"
+    else:
+        report += "1. No specific recommendations at this time\n"
+    
+    # Risk Assessment
+    report += f"""
+---
+
+## ⚠️ Risk Assessment
+
+{risk_assessment if risk_assessment else "No risk assessment provided."}
+
+---
+
+## 📋 Executive Summary
+
+{executive_summary if executive_summary else "No executive summary provided."}
+
+---
+
+## 📊 Grade Interpretation Guide
+
+| Grade | Score Range | Interpretation |
+|-------|-------------|----------------|
+| A | 90-100 | ✅ Excellent - Strongly recommended |
+| B | 80-89 | ✅ Good - Recommended |
+| C | 70-79 | ⚠️ Acceptable - Consider with improvements |
+| D | 60-69 | 🟠 Below Average - Significant concerns |
+| F | Below 60 | ❌ Poor - Not recommended |
+
+---
+
+*Report generated by RFP Analyzer V2 (Multi-Agent) - Powered by Azure Content Understanding & Microsoft Agent Framework*
+"""
+    
+    # Add timing metadata if available
+    metadata = results.get("_metadata", {})
+    if metadata:
+        phase1 = format_duration(metadata.get('phase1_criteria_extraction_seconds', 0))
+        phase2 = format_duration(metadata.get('phase2_proposal_scoring_seconds', 0))
+        total_eval = format_duration(metadata.get('total_duration_seconds', 0))
+        
+        report += f"""
+---
+
+## ⏱️ Evaluation Timing
+
+| Phase | Duration |
+|-------|----------|
+| **Criteria Extraction (Agent 1)** | {phase1} |
+| **Proposal Scoring (Agent 2)** | {phase2} |
+| **Total Evaluation Time** | {total_eval} |
+| **Model Deployment** | {metadata.get('model_deployment', 'N/A')} |
+| **Reasoning Effort** | {metadata.get('reasoning_effort', 'N/A')} |
+"""
+    
+    return report
 
 
 def render_timing_summary(durations: dict, results: dict):
