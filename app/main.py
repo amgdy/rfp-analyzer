@@ -28,16 +28,15 @@ os.environ["AZURE_TRACING_GEN_AI_CONTENT_RECORDING_ENABLED"] = "true" # False by
 
 
 # Configure Application Insights if connection string is available
-app_insights_conn_str = os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING")
-if app_insights_conn_str:
-    configure_azure_monitor(
-        connection_string=app_insights_conn_str,
-        enable_live_metrics=True,
-        resource=create_resource(),
-    )
+# app_insights_conn_str = os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING")
+# if app_insights_conn_str:
+#     configure_azure_monitor(
+#         connection_string=app_insights_conn_str,
+#         enable_live_metrics=True
+#     )
 
-# # optional if you do not have ENABLE_INSTRUMENTATION in env vars
-enable_instrumentation()    
+# # # optional if you do not have ENABLE_INSTRUMENTATION in env vars
+# enable_instrumentation()    
 from services.document_processor import DocumentProcessor
 from services.scoring_agent import ScoringAgent
 from services.scoring_agent_v2 import ScoringAgentV2
