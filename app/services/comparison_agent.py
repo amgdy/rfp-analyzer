@@ -19,6 +19,15 @@ from azure.identity import DefaultAzureCredential
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
+# Optional dependency for Word document generation
+try:
+    from docx import Document
+    from docx.shared import Inches, Pt
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    DOCX_AVAILABLE = True
+except ImportError:
+    DOCX_AVAILABLE = False
+
 load_dotenv()
 
 # Configure logging
@@ -438,11 +447,7 @@ def generate_word_report(evaluation: Dict[str, Any], rfp_content: str = "") -> b
     Returns:
         Word document as bytes
     """
-    try:
-        from docx import Document
-        from docx.shared import Inches, Pt
-        from docx.enum.text import WD_ALIGN_PARAGRAPH
-    except ImportError:
+    if not DOCX_AVAILABLE:
         logger.warning("python-docx not installed. Word export not available.")
         return None
     
