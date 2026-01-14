@@ -1,0 +1,60 @@
+# =============================================================================
+# RFP Analyzer - Docker Compose Configuration
+# =============================================================================
+# Usage:
+#   Development:  docker compose up
+#   Production:   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#   Build:        docker compose build
+# =============================================================================
+
+services:
+  rfp-analyzer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: rfp-analyzer:latest
+    container_name: rfp-analyzer
+    ports:
+      - "8501:8501"
+    environment:
+      # Azure AI Services / Content Understanding
+      - AZURE_AI_ENDPOINT=${AZURE_AI_ENDPOINT}
+      - AZURE_AI_API_KEY=${AZURE_AI_API_KEY:-}
+      
+      # Azure OpenAI
+      - AZURE_OPENAI_ENDPOINT=${AZURE_OPENAI_ENDPOINT}
+      - AZURE_OPENAI_DEPLOYMENT_NAME=${AZURE_OPENAI_DEPLOYMENT_NAME:-gpt-4o-mini}
+      - AZURE_OPENAI_API_KEY=${AZURE_OPENAI_API_KEY:-}
+      
+      # Azure Service Principal (optional - for non-interactive auth)
+      - AZURE_TENANT_ID=${AZURE_TENANT_ID:-}
+      - AZURE_CLIENT_ID=${AZURE_CLIENT_ID:-}
+      - AZURE_CLIENT_SECRET=${AZURE_CLIENT_SECRET:-}
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 512M
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+# =============================================================================
+# Notes:
+# =============================================================================
+# 1. Copy .env.example to .env and fill in your Azure credentials
+# 2. For Azure AD authentication, set AZURE_TENANT_ID, AZURE_CLIENT_ID, 
+#    and AZURE_CLIENT_SECRET for a service principal
+# 3. Alternatively, use API keys: AZURE_AI_API_KEY and AZURE_OPENAI_API_KEY
+# =============================================================================

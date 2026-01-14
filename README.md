@@ -44,11 +44,48 @@ A Streamlit-based POC application for analyzing RFPs (Request for Proposals) and
 
 ## Running the Application
 
+### Local Development
+
 ```bash
 uv run streamlit run app/main.py
 ```
 
 The app will open in your browser at `http://localhost:8501`
+
+### Docker
+
+**Using Docker Compose (recommended):**
+
+```bash
+# Copy environment file and configure
+cp .env.example .env
+# Edit .env with your Azure credentials
+
+# Build and run
+docker compose up --build
+
+# Run in background
+docker compose up -d
+```
+
+**Using Docker directly:**
+
+```bash
+# Build the image
+docker build -t rfp-analyzer .
+
+# Run the container
+docker run -p 8501:8501 \
+  -e AZURE_AI_ENDPOINT=your-endpoint \
+  -e AZURE_OPENAI_ENDPOINT=your-openai-endpoint \
+  -e AZURE_OPENAI_DEPLOYMENT_NAME=gpt-4o-mini \
+  -e AZURE_TENANT_ID=your-tenant-id \
+  -e AZURE_CLIENT_ID=your-client-id \
+  -e AZURE_CLIENT_SECRET=your-client-secret \
+  rfp-analyzer
+```
+
+The app will be available at `http://localhost:8501`
 
 ## Project Structure
 
