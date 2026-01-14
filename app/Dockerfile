@@ -15,8 +15,8 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 # Set working directory
 WORKDIR /app
 
-# Copy dependency files first for better caching (now from app folder)
-COPY app/pyproject.toml app/uv.lock ./
+# Copy dependency files first for better caching
+COPY pyproject.toml uv.lock ./
 
 # Install dependencies (including PDF export extras)
 RUN uv sync --frozen --no-dev --all-extras
@@ -46,7 +46,7 @@ WORKDIR /app
 COPY --from=builder /app/.venv /app/.venv
 
 # Copy application code
-COPY app/ ./
+COPY . ./
 
 # Set environment variables
 ENV PATH="/app/.venv/bin:$PATH"

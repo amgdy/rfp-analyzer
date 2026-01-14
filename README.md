@@ -47,7 +47,9 @@ A Streamlit-based POC application for analyzing RFPs (Request for Proposals) and
 ### Local Development
 
 ```bash
-uv run streamlit run app/main.py
+cd app
+uv sync
+uv run streamlit run main.py
 ```
 
 The app will open in your browser at `http://localhost:8501`
@@ -57,6 +59,8 @@ The app will open in your browser at `http://localhost:8501`
 **Using Docker Compose (recommended):**
 
 ```bash
+cd app
+
 # Copy environment file and configure
 cp .env.example .env
 # Edit .env with your Azure credentials
@@ -71,6 +75,8 @@ docker compose up -d
 **Using Docker directly:**
 
 ```bash
+cd app
+
 # Build the image
 docker build -t rfp-analyzer .
 
@@ -91,15 +97,21 @@ The app will be available at `http://localhost:8501`
 
 ```
 rfp-analyzer/
-├── app/
-│   ├── main.py                    # Streamlit application
-│   ├── scoring_guide.md           # Evaluation criteria
-│   └── services/
-│       ├── document_processor.py  # Azure Document Intelligence
-│       └── scoring_agent.py       # Microsoft Agent Framework
-├── pyproject.toml                 # Dependencies
-├── .env.example                   # Environment template
-└── README.md                      # This file
+├── README.md                      # This file
+├── azure.yaml                     # Azure Developer CLI config
+└── app/
+    ├── .env                       # Environment variables (create from .env.example)
+    ├── .env.example               # Environment template
+    ├── main.py                    # Streamlit application
+    ├── pyproject.toml             # Dependencies (uv)
+    ├── uv.lock                    # Lock file
+    ├── Dockerfile                 # Docker image definition
+    ├── docker-compose.yml         # Docker Compose config
+    ├── scoring_guide.md           # Evaluation criteria
+    └── services/
+        ├── document_processor.py  # Azure Content Understanding
+        ├── scoring_agent.py       # V1 Single Agent scoring
+        └── scoring_agent_v2.py    # V2 Multi Agents scoring
 ```
 
 ## Customization

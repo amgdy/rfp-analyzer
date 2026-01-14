@@ -109,7 +109,9 @@ azure-core==1.37.0
     #   microsoft-agents-hosting-core
     #   msrest
 azure-core-tracing-opentelemetry==1.0.0b12
-    # via azure-monitor-opentelemetry
+    # via
+    #   azure-monitor-opentelemetry
+    #   rfp-analyzer
 azure-functions==1.25.0b3.dev1
     # via
     #   agent-framework-azurefunctions
@@ -380,6 +382,7 @@ opentelemetry-sdk==1.39.0
     #   azure-monitor-opentelemetry
     #   azure-monitor-opentelemetry-exporter
     #   opentelemetry-resource-detector-azure
+    #   rfp-analyzer
 opentelemetry-semantic-conventions==0.60b0
     # via
     #   opentelemetry-instrumentation

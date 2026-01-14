@@ -5,6 +5,8 @@
 #   Development:  docker compose up
 #   Production:   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 #   Build:        docker compose build
+#   
+# Run from the app folder: cd app && docker compose up --build
 # =============================================================================
 
 services:
@@ -16,6 +18,8 @@ services:
     container_name: rfp-analyzer
     ports:
       - "8501:8501"
+    env_file:
+      - .env
     environment:
       # Azure AI Services / Content Understanding
       - AZURE_AI_ENDPOINT=${AZURE_AI_ENDPOINT}

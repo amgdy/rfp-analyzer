@@ -11,9 +11,9 @@
                 "${workspaceFolder}/app/main.py",
                 "--server.port=8501"
             ],
-            "cwd": "${workspaceFolder}",
+            "cwd": "${workspaceFolder}/app",
             "env": {
-                "PYTHONPATH": "${workspaceFolder}"
+                "PYTHONPATH": "${workspaceFolder}/app"
             },
             "console": "integratedTerminal",
             "justMyCode": true
@@ -29,9 +29,9 @@
                 "--server.port=8501",
                 "--server.headless=true"
             ],
-            "cwd": "${workspaceFolder}",
+            "cwd": "${workspaceFolder}/app",
             "env": {
-                "PYTHONPATH": "${workspaceFolder}"
+                "PYTHONPATH": "${workspaceFolder}/app"
             },
             "console": "integratedTerminal",
             "justMyCode": true
@@ -41,7 +41,7 @@
             "type": "debugpy",
             "request": "launch",
             "program": "${file}",
-            "cwd": "${workspaceFolder}",
+            "cwd": "${workspaceFolder}/app",
             "console": "integratedTerminal",
             "justMyCode": true
         }
