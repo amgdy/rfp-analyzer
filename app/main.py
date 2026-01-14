@@ -7,6 +7,7 @@ A 3-step workflow for analyzing RFPs and scoring vendor proposals:
 3. Evaluate and score
 """
 
+import os
 import streamlit as st
 from pathlib import Path
 import asyncio
@@ -15,6 +16,28 @@ import logging
 import io
 from datetime import datetime
 
+# Initialize Azure Monitor / Application Insights telemetry
+# Must be done before other imports to instrument all libraries
+from azure.monitor.opentelemetry import configure_azure_monitor
+from agent_framework.observability import create_resource, enable_instrumentation
+
+
+from opentelemetry import trace
+
+os.environ["AZURE_TRACING_GEN_AI_CONTENT_RECORDING_ENABLED"] = "true" # False by default
+
+
+# Configure Application Insights if connection string is available
+app_insights_conn_str = os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING")
+if app_insights_conn_str:
+    configure_azure_monitor(
+        connection_string=app_insights_conn_str,
+        enable_live_metrics=True,
+        resource=create_resource(),
+    )
+
+# # optional if you do not have ENABLE_INSTRUMENTATION in env vars
+enable_instrumentation()    
 from services.document_processor import DocumentProcessor
 from services.scoring_agent import ScoringAgent
 from services.scoring_agent_v2 import ScoringAgentV2
@@ -39,6 +62,9 @@ logging.basicConfig(
     datefmt='%Y-%m-%d %H:%M:%S'
 )
 logger = logging.getLogger(__name__)
+
+# Get tracer for custom spans
+tracer = trace.get_tracer(__name__)
 
 
 def format_duration(seconds: float) -> str:
@@ -269,16 +295,22 @@ async def process_document(file_bytes: bytes, filename: str) -> tuple[str, float
     Returns:
         Tuple of (content, duration_seconds)
     """
-    start_time = time.time()
-    logger.info("Starting document processing: %s", filename)
-    
-    processor = DocumentProcessor()
-    content = await processor.extract_content(file_bytes, filename)
-    
-    duration = time.time() - start_time
-    logger.info("Document processed: %s (%.2fs, %d chars)", filename, duration, len(content))
-    
-    return content, duration
+    with tracer.start_as_current_span("process_document") as span:
+        span.set_attribute("document.filename", filename)
+        span.set_attribute("document.size_bytes", len(file_bytes))
+        
+        start_time = time.time()
+        logger.info("Starting document processing: %s", filename)
+        
+        processor = DocumentProcessor()
+        content = await processor.extract_content(file_bytes, filename)
+        
+        duration = time.time() - start_time
+        span.set_attribute("document.content_length", len(content))
+        span.set_attribute("document.duration_seconds", duration)
+        logger.info("Document processed: %s (%.2fs, %d chars)", filename, duration, len(content))
+        
+        return content, duration
 
 
 async def evaluate_proposal(
@@ -302,25 +334,39 @@ async def evaluate_proposal(
     Returns:
         Tuple of (results, duration_seconds)
     """
-    start_time = time.time()
-    logger.info("Starting proposal evaluation (version: %s, effort: %s)...", version, reasoning_effort)
-    
-    if version == "v2":
-        agent = ScoringAgentV2()
-        results = await agent.evaluate(
-            rfp_content, 
-            proposal_content, 
-            reasoning_effort=reasoning_effort,
-            progress_callback=progress_callback
-        )
-    else:
-        agent = ScoringAgent()
-        results = await agent.evaluate(rfp_content, proposal_content, scoring_guide, reasoning_effort=reasoning_effort)
-    
-    duration = time.time() - start_time
-    logger.info("Evaluation completed in %.2fs", duration)
-    
-    return results, duration
+    with tracer.start_as_current_span("evaluate_proposal") as span:
+        span.set_attribute("evaluation.version", version)
+        span.set_attribute("evaluation.reasoning_effort", reasoning_effort)
+        span.set_attribute("evaluation.rfp_content_length", len(rfp_content))
+        span.set_attribute("evaluation.proposal_content_length", len(proposal_content))
+        
+        start_time = time.time()
+        logger.info("Starting proposal evaluation (version: %s, effort: %s)...", version, reasoning_effort)
+        
+        if version == "v2":
+            agent = ScoringAgentV2()
+            results = await agent.evaluate(
+                rfp_content, 
+                proposal_content, 
+                reasoning_effort=reasoning_effort,
+                progress_callback=progress_callback
+            )
+        else:
+            agent = ScoringAgent()
+            results = await agent.evaluate(rfp_content, proposal_content, scoring_guide, reasoning_effort=reasoning_effort)
+        
+        duration = time.time() - start_time
+        
+        # Add result attributes to span
+        if isinstance(results, dict) and "total_score" in results:
+            span.set_attribute("evaluation.total_score", results["total_score"])
+        elif hasattr(results, "evaluation") and hasattr(results.evaluation, "total_score"):
+            span.set_attribute("evaluation.total_score", results.evaluation.total_score)
+        span.set_attribute("evaluation.duration_seconds", duration)
+        
+        logger.info("Evaluation completed in %.2fs", duration)
+        
+        return results, duration
 
 
 def render_sidebar():

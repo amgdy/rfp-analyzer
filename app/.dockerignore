@@ -46,8 +46,7 @@ tests/
 # Documentation (not needed in container)
 docs/
 *.md
-!app/scoring_guide.md
-!README.md
+!scoring_guide.md
 
 # Build artifacts
 dist/
