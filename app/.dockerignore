@@ -29,7 +29,7 @@ env
 *~
 
 # Environment and secrets
-.env
+# .env is now included for Docker builds
 .env.local
 .env.*.local
 
