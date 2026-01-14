@@ -1,0 +1,528 @@
+"""
+Comparison Agent for Multi-Vendor RFP Evaluation.
+
+This module provides an agent that compares evaluation results
+across multiple vendors and generates comparison reports.
+"""
+
+import os
+import json
+import logging
+import time
+import csv
+import io
+from datetime import datetime
+from typing import List, Dict, Any, Optional, Callable
+
+from agent_framework.azure import AzureOpenAIResponsesClient
+from azure.identity import DefaultAzureCredential
+from pydantic import BaseModel, Field
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s.%(msecs)03d | %(levelname)s | %(name)s | %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
+
+
+class VendorRanking(BaseModel):
+    """Ranking for a single vendor."""
+    rank: int = Field(description="Rank position (1 = best)")
+    vendor_name: str = Field(description="Vendor name")
+    total_score: float = Field(description="Total weighted score")
+    grade: str = Field(description="Letter grade")
+    key_strengths: List[str] = Field(description="Top 3 strengths")
+    key_concerns: List[str] = Field(description="Top 3 concerns")
+    recommendation: str = Field(description="Brief recommendation")
+
+
+class CriterionComparison(BaseModel):
+    """Comparison of vendors for a specific criterion."""
+    criterion_id: str = Field(description="Criterion ID")
+    criterion_name: str = Field(description="Criterion name")
+    weight: float = Field(description="Criterion weight")
+    best_vendor: str = Field(description="Best performing vendor for this criterion")
+    worst_vendor: str = Field(description="Worst performing vendor for this criterion")
+    score_range: str = Field(description="Score range across vendors (e.g., '65-92')")
+    insights: str = Field(description="Key insights for this criterion")
+
+
+class ComparisonResult(BaseModel):
+    """Complete comparison result for multiple vendors."""
+    rfp_title: str = Field(description="Title of the RFP")
+    comparison_date: str = Field(description="Date of comparison")
+    total_vendors: int = Field(description="Number of vendors compared")
+    
+    # Rankings
+    vendor_rankings: List[VendorRanking] = Field(description="Vendors ranked by score")
+    
+    # Criterion-level comparison
+    criterion_comparisons: List[CriterionComparison] = Field(description="Comparison by criterion")
+    
+    # Overall analysis
+    winner_summary: str = Field(description="Summary of recommended vendor")
+    comparison_insights: List[str] = Field(description="Key insights from comparison")
+    selection_recommendation: str = Field(description="Final selection recommendation")
+    risk_comparison: str = Field(description="Comparative risk assessment")
+
+
+class ComparisonAgent:
+    """
+    Agent for comparing multiple vendor evaluations.
+    
+    Takes evaluation results from multiple vendors and generates
+    comparative analysis, rankings, and recommendations.
+    """
+    
+    SYSTEM_INSTRUCTIONS = """You are an expert procurement analyst specializing in vendor comparison and selection.
+
+Your task is to analyze evaluation results from multiple vendors responding to the same RFP 
+and provide a comprehensive comparative analysis.
+
+## YOUR RESPONSIBILITIES:
+
+1. **Rank Vendors**: Order vendors by total score, identifying the best performer
+2. **Compare by Criterion**: Analyze how vendors performed on each evaluation criterion
+3. **Identify Patterns**: Find strengths and weaknesses across the vendor pool
+4. **Provide Insights**: Offer actionable insights for the selection committee
+5. **Make Recommendations**: Provide clear selection recommendations
+
+## ANALYSIS APPROACH:
+
+For each vendor:
+- Review their total score and individual criterion scores
+- Identify their top 3 strengths and top 3 concerns
+- Assess their suitability for the project
+
+For the comparison:
+- Identify which vendors excel in which areas
+- Note any significant score gaps between vendors
+- Highlight criteria where all vendors performed well or poorly
+- Consider risk factors and value for money
+
+## OUTPUT FORMAT:
+
+Respond with a valid JSON object:
+
+```json
+{
+  "rfp_title": "RFP title",
+  "comparison_date": "YYYY-MM-DD",
+  "total_vendors": <number>,
+  "vendor_rankings": [
+    {
+      "rank": 1,
+      "vendor_name": "Vendor Name",
+      "total_score": 85.5,
+      "grade": "B",
+      "key_strengths": ["strength 1", "strength 2", "strength 3"],
+      "key_concerns": ["concern 1", "concern 2", "concern 3"],
+      "recommendation": "Brief recommendation for this vendor"
+    }
+  ],
+  "criterion_comparisons": [
+    {
+      "criterion_id": "C-1",
+      "criterion_name": "Criterion Name",
+      "weight": 20.0,
+      "best_vendor": "Best Vendor",
+      "worst_vendor": "Worst Vendor",
+      "score_range": "65-92",
+      "insights": "Key insight for this criterion"
+    }
+  ],
+  "winner_summary": "Summary of why the top vendor is recommended",
+  "comparison_insights": [
+    "Key insight 1",
+    "Key insight 2",
+    "Key insight 3"
+  ],
+  "selection_recommendation": "Clear final recommendation with justification",
+  "risk_comparison": "Comparative risk assessment across vendors"
+}
+```
+
+## IMPORTANT:
+- Rank ALL vendors by score
+- Compare ALL criteria
+- Be objective and fair
+- Support recommendations with evidence
+- Respond with ONLY valid JSON"""
+
+    def __init__(self):
+        """Initialize the comparison agent."""
+        logger.info("Initializing ComparisonAgent...")
+        
+        self._validate_config()
+        
+        endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+        deployment_name = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME")
+        
+        self.client = AzureOpenAIResponsesClient(
+            credential=DefaultAzureCredential(),
+            endpoint=endpoint,
+            deployment_name=deployment_name,
+            api_version="v1"
+        )
+        
+        self.deployment_name = deployment_name
+        logger.info("ComparisonAgent initialized")
+    
+    def _validate_config(self):
+        """Validate required configuration."""
+        required_vars = ["AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_DEPLOYMENT_NAME"]
+        missing = [var for var in required_vars if not os.getenv(var)]
+        if missing:
+            raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
+    
+    async def compare_evaluations(
+        self,
+        evaluations: List[Dict[str, Any]],
+        rfp_title: str,
+        progress_callback: Optional[Callable[[str], None]] = None,
+        reasoning_effort: str = "high"
+    ) -> Dict[str, Any]:
+        """
+        Compare multiple vendor evaluations.
+        
+        Args:
+            evaluations: List of evaluation results from individual vendor scoring
+            rfp_title: Title of the RFP
+            progress_callback: Optional callback for progress updates
+            reasoning_effort: Reasoning effort level ("low", "medium", "high")
+            
+        Returns:
+            Dictionary containing comparison results
+        """
+        start_time = time.time()
+        logger.info("Starting comparison of %d vendor evaluations (effort: %s)...", 
+                   len(evaluations), reasoning_effort)
+        
+        if progress_callback:
+            progress_callback("Preparing vendor comparison...")
+        
+        # Format evaluations for the prompt
+        evaluations_summary = self._format_evaluations_for_prompt(evaluations)
+        
+        user_prompt = f"""Please compare the following vendor evaluations and provide a comprehensive analysis.
+
+## RFP TITLE: {rfp_title}
+
+## VENDOR EVALUATIONS:
+
+{evaluations_summary}
+
+---
+
+REQUIREMENTS:
+1. Rank all vendors by total score
+2. Compare performance on each criterion
+3. Identify the best and worst performers per criterion
+4. Provide clear selection recommendations
+5. Assess comparative risks
+
+Respond with ONLY valid JSON matching the schema in your instructions."""
+
+        try:
+            agent = self.client.create_agent(
+                instructions=self.SYSTEM_INSTRUCTIONS,
+                name="Comparison Agent",
+                additional_chat_options={"reasoning": {"effort": reasoning_effort, "summary": "detailed"}}
+            )
+            
+            if progress_callback:
+                progress_callback("Analyzing vendor comparisons...")
+            
+            result = await agent.run(user_prompt)
+            response_text = result.text
+            
+            # Log token usage
+            usage = result.usage_details
+            if usage:
+                logger.info("Comparison - Tokens: Input=%d, Output=%d, Total=%d",
+                           usage.input_token_count or 0,
+                           usage.output_token_count or 0,
+                           usage.total_token_count or 0)
+            
+            # Parse the response
+            comparison_data = self._parse_response(response_text)
+            
+            duration = time.time() - start_time
+            logger.info("Comparison completed in %.2fs", duration)
+            
+            # Add metadata
+            comparison_data["_metadata"] = {
+                "comparison_timestamp": datetime.now().isoformat(),
+                "total_duration_seconds": round(duration, 2),
+                "vendors_compared": len(evaluations),
+                "model_deployment": self.deployment_name,
+                "reasoning_effort": reasoning_effort
+            }
+            
+            return comparison_data
+            
+        except Exception as e:
+            logger.error("Comparison failed: %s", str(e))
+            raise
+    
+    def _format_evaluations_for_prompt(self, evaluations: List[Dict[str, Any]]) -> str:
+        """Format evaluations for the comparison prompt."""
+        formatted = []
+        
+        for i, eval_result in enumerate(evaluations, 1):
+            vendor_name = eval_result.get("supplier_name", f"Vendor {i}")
+            total_score = eval_result.get("total_score", 0)
+            grade = eval_result.get("grade", "N/A")
+            
+            summary = f"""### Vendor {i}: {vendor_name}
+- **Total Score:** {total_score:.2f}
+- **Grade:** {grade}
+
+**Criterion Scores:**
+"""
+            
+            # Add criterion scores
+            criterion_scores = eval_result.get("criterion_scores", [])
+            for cs in criterion_scores:
+                summary += f"- {cs.get('criterion_name', cs.get('criterion_id', 'Unknown'))}: {cs.get('raw_score', 0):.1f} (weighted: {cs.get('weighted_score', 0):.2f})\n"
+            
+            # Add strengths and weaknesses
+            strengths = eval_result.get("overall_strengths", [])
+            weaknesses = eval_result.get("overall_weaknesses", [])
+            
+            if strengths:
+                summary += "\n**Strengths:** " + ", ".join(strengths[:5])
+            if weaknesses:
+                summary += "\n**Weaknesses:** " + ", ".join(weaknesses[:5])
+            
+            formatted.append(summary)
+        
+        return "\n\n---\n\n".join(formatted)
+    
+    def _parse_response(self, response_text: str) -> Dict[str, Any]:
+        """Parse the agent response."""
+        text = response_text.strip()
+        
+        # Remove markdown code blocks
+        if text.startswith("```json"):
+            text = text[7:]
+        elif text.startswith("```"):
+            text = text[3:]
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
+        
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError as e:
+            logger.error("Failed to parse comparison JSON: %s", str(e))
+            return {
+                "rfp_title": "Unknown RFP",
+                "comparison_date": datetime.now().strftime("%Y-%m-%d"),
+                "total_vendors": 0,
+                "vendor_rankings": [],
+                "criterion_comparisons": [],
+                "winner_summary": "Error parsing comparison results",
+                "comparison_insights": [],
+                "selection_recommendation": "Unable to provide recommendation due to parsing error",
+                "risk_comparison": "Unable to assess"
+            }
+    
+    def generate_csv_report(self, comparison: Dict[str, Any], evaluations: List[Dict[str, Any]]) -> str:
+        """
+        Generate a CSV report from comparison results.
+        
+        Args:
+            comparison: Comparison result from compare_evaluations
+            evaluations: Original evaluation results
+            
+        Returns:
+            CSV content as string
+        """
+        output = io.StringIO()
+        
+        # Create comprehensive CSV with all metrics
+        
+        # Section 1: Summary Rankings
+        writer = csv.writer(output)
+        writer.writerow(["RFP Comparison Report"])
+        writer.writerow(["RFP Title", comparison.get("rfp_title", "")])
+        writer.writerow(["Comparison Date", comparison.get("comparison_date", "")])
+        writer.writerow(["Total Vendors", comparison.get("total_vendors", len(evaluations))])
+        writer.writerow([])
+        
+        # Vendor Rankings
+        writer.writerow(["=== VENDOR RANKINGS ==="])
+        writer.writerow(["Rank", "Vendor Name", "Total Score", "Grade", "Recommendation"])
+        
+        for ranking in comparison.get("vendor_rankings", []):
+            writer.writerow([
+                ranking.get("rank", ""),
+                ranking.get("vendor_name", ""),
+                f"{ranking.get('total_score', 0):.2f}",
+                ranking.get("grade", ""),
+                ranking.get("recommendation", "")
+            ])
+        
+        writer.writerow([])
+        
+        # Criterion Comparison Matrix
+        writer.writerow(["=== CRITERION COMPARISON ==="])
+        
+        # Get all criteria from first evaluation
+        all_criteria = []
+        if evaluations:
+            all_criteria = [cs.get("criterion_name", cs.get("criterion_id", "Unknown")) 
+                          for cs in evaluations[0].get("criterion_scores", [])]
+        
+        # Header row
+        header = ["Criterion", "Weight"] + [e.get("supplier_name", f"Vendor {i+1}") 
+                                           for i, e in enumerate(evaluations)]
+        writer.writerow(header)
+        
+        # Score rows for each criterion
+        for criterion_idx, criterion_name in enumerate(all_criteria):
+            row = [criterion_name]
+            
+            # Get weight from first evaluation
+            if evaluations and criterion_idx < len(evaluations[0].get("criterion_scores", [])):
+                weight = evaluations[0]["criterion_scores"][criterion_idx].get("weight", 0)
+                row.append(f"{weight:.1f}%")
+            else:
+                row.append("")
+            
+            # Add each vendor's score for this criterion
+            for eval_result in evaluations:
+                scores = eval_result.get("criterion_scores", [])
+                if criterion_idx < len(scores):
+                    score = scores[criterion_idx].get("raw_score", 0)
+                    row.append(f"{score:.1f}")
+                else:
+                    row.append("")
+            
+            writer.writerow(row)
+        
+        # Total scores row
+        total_row = ["TOTAL SCORE", "100%"]
+        for eval_result in evaluations:
+            total_row.append(f"{eval_result.get('total_score', 0):.2f}")
+        writer.writerow(total_row)
+        
+        writer.writerow([])
+        
+        # Insights
+        writer.writerow(["=== KEY INSIGHTS ==="])
+        for insight in comparison.get("comparison_insights", []):
+            writer.writerow([insight])
+        
+        writer.writerow([])
+        writer.writerow(["=== SELECTION RECOMMENDATION ==="])
+        writer.writerow([comparison.get("selection_recommendation", "")])
+        
+        return output.getvalue()
+
+
+def generate_word_report(evaluation: Dict[str, Any], rfp_content: str = "") -> bytes:
+    """
+    Generate a Word document report from evaluation results.
+    
+    Args:
+        evaluation: Evaluation result dictionary
+        rfp_content: Optional RFP content for context
+        
+    Returns:
+        Word document as bytes
+    """
+    try:
+        from docx import Document
+        from docx.shared import Inches, Pt
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+    except ImportError:
+        logger.warning("python-docx not installed. Word export not available.")
+        return None
+    
+    doc = Document()
+    
+    # Title
+    title = doc.add_heading('RFP Evaluation Report', 0)
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    
+    # Summary section
+    doc.add_heading('Evaluation Summary', level=1)
+    
+    table = doc.add_table(rows=6, cols=2)
+    table.style = 'Table Grid'
+    
+    summary_data = [
+        ("RFP Title", evaluation.get("rfp_title", "")),
+        ("Vendor Name", evaluation.get("supplier_name", "")),
+        ("Total Score", f"{evaluation.get('total_score', 0):.2f}"),
+        ("Grade", evaluation.get("grade", "")),
+        ("Evaluation Date", evaluation.get("evaluation_date", "")),
+        ("Recommendation", evaluation.get("recommendation", ""))
+    ]
+    
+    for i, (label, value) in enumerate(summary_data):
+        row = table.rows[i]
+        row.cells[0].text = label
+        row.cells[1].text = str(value)
+    
+    doc.add_paragraph()
+    
+    # Criterion Scores
+    doc.add_heading('Criterion Scores', level=1)
+    
+    criterion_scores = evaluation.get("criterion_scores", [])
+    if criterion_scores:
+        scores_table = doc.add_table(rows=len(criterion_scores) + 1, cols=4)
+        scores_table.style = 'Table Grid'
+        
+        # Header
+        headers = ["Criterion", "Weight", "Score", "Weighted Score"]
+        header_row = scores_table.rows[0]
+        for i, h in enumerate(headers):
+            header_row.cells[i].text = h
+        
+        # Data rows
+        for i, cs in enumerate(criterion_scores, 1):
+            row = scores_table.rows[i]
+            row.cells[0].text = cs.get("criterion_name", "")
+            row.cells[1].text = f"{cs.get('weight', 0):.1f}%"
+            row.cells[2].text = f"{cs.get('raw_score', 0):.1f}"
+            row.cells[3].text = f"{cs.get('weighted_score', 0):.2f}"
+    
+    doc.add_paragraph()
+    
+    # Strengths
+    doc.add_heading('Key Strengths', level=1)
+    for strength in evaluation.get("overall_strengths", []):
+        doc.add_paragraph(f"• {strength}", style='List Bullet')
+    
+    # Weaknesses
+    doc.add_heading('Key Weaknesses', level=1)
+    for weakness in evaluation.get("overall_weaknesses", []):
+        doc.add_paragraph(f"• {weakness}", style='List Bullet')
+    
+    # Recommendations
+    doc.add_heading('Recommendations', level=1)
+    for rec in evaluation.get("recommendations", []):
+        doc.add_paragraph(f"• {rec}", style='List Bullet')
+    
+    # Executive Summary
+    doc.add_heading('Executive Summary', level=1)
+    doc.add_paragraph(evaluation.get("executive_summary", ""))
+    
+    # Risk Assessment
+    doc.add_heading('Risk Assessment', level=1)
+    doc.add_paragraph(evaluation.get("risk_assessment", ""))
+    
+    # Save to bytes
+    buffer = io.BytesIO()
+    doc.save(buffer)
+    buffer.seek(0)
+    return buffer.getvalue()
