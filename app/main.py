@@ -270,19 +270,25 @@ async def process_document(file_bytes: bytes, filename: str) -> tuple[str, float
         Tuple of (content, duration_seconds)
     """
     start_time = time.time()
-    logger.info("[%s] Starting document processing: %s", datetime.now().isoformat(), filename)
+    logger.info("Starting document processing: %s", filename)
     
     processor = DocumentProcessor()
     content = await processor.extract_content(file_bytes, filename)
     
     duration = time.time() - start_time
-    logger.info("[%s] Document processed: %s (%.2fs, %d chars)", 
-               datetime.now().isoformat(), filename, duration, len(content))
+    logger.info("Document processed: %s (%.2fs, %d chars)", filename, duration, len(content))
     
     return content, duration
 
 
-async def evaluate_proposal(rfp_content: str, proposal_content: str, scoring_guide: str, version: str = "v1", reasoning_effort: str = "high") -> tuple[dict, float]:
+async def evaluate_proposal(
+    rfp_content: str, 
+    proposal_content: str, 
+    scoring_guide: str, 
+    version: str = "v1", 
+    reasoning_effort: str = "high",
+    progress_callback: callable = None
+) -> tuple[dict, float]:
     """Evaluate the vendor proposal against the RFP using AI agent.
     
     Args:
@@ -291,22 +297,28 @@ async def evaluate_proposal(rfp_content: str, proposal_content: str, scoring_gui
         scoring_guide: The scoring guide (used in v1 only)
         version: Scoring version ("v1" or "v2")
         reasoning_effort: Reasoning effort level ("low", "medium", "high")
+        progress_callback: Optional callback for progress updates (V2 only)
     
     Returns:
         Tuple of (results, duration_seconds)
     """
     start_time = time.time()
-    logger.info("[%s] Starting proposal evaluation (version: %s, effort: %s)...", datetime.now().isoformat(), version, reasoning_effort)
+    logger.info("Starting proposal evaluation (version: %s, effort: %s)...", version, reasoning_effort)
     
     if version == "v2":
         agent = ScoringAgentV2()
-        results = await agent.evaluate(rfp_content, proposal_content, reasoning_effort=reasoning_effort)
+        results = await agent.evaluate(
+            rfp_content, 
+            proposal_content, 
+            reasoning_effort=reasoning_effort,
+            progress_callback=progress_callback
+        )
     else:
         agent = ScoringAgent()
         results = await agent.evaluate(rfp_content, proposal_content, scoring_guide, reasoning_effort=reasoning_effort)
     
     duration = time.time() - start_time
-    logger.info("[%s] Evaluation completed in %.2fs", datetime.now().isoformat(), duration)
+    logger.info("Evaluation completed in %.2fs", duration)
     
     return results, duration
 
@@ -325,7 +337,7 @@ def render_sidebar():
             "Select scoring version:",
             options=["v1", "v2"],
             index=0 if st.session_state.scoring_version == "v1" else 1,
-            format_func=lambda x: "V1 - Single Agent" if x == "v1" else "V2 - Multi-Agent",
+            format_func=lambda x: "V1 - Single Agent" if x == "v1" else "V2 - Multi Agents",
             help="V1: Uses predefined scoring guide. V2: Extracts criteria from RFP automatically."
         )
         if version != st.session_state.scoring_version:
@@ -337,22 +349,22 @@ def render_sidebar():
         if st.session_state.scoring_version == "v1":
             st.caption("📋 Uses predefined scoring criteria from the scoring guide.")
         else:
-            st.caption("🤖 Multi-agent: Extracts criteria from RFP, then scores the proposal.")
+            st.caption("🤖 Multi Agents: Extracts criteria from RFP, then scores the proposal.")
         
         st.markdown("")
         
-        # Reasoning Effort Selection
-        reasoning_options = {
-            "low": "Low (~5 mins)",
-            "medium": "Medium (~10 mins)",
-            "high": "High (~15 mins)"
+        # Analysis Depth Selection
+        depth_options = {
+            "low": "Standard (~5 mins)",
+            "medium": "Thorough (~10 mins)",
+            "high": "Comprehensive (~15 mins)"
         }
         effort = st.radio(
-            "Reasoning effort:",
+            "Analysis depth:",
             options=["low", "medium", "high"],
             index=["low", "medium", "high"].index(st.session_state.reasoning_effort),
-            format_func=lambda x: reasoning_options[x],
-            help="Higher effort = deeper analysis but longer processing time."
+            format_func=lambda x: depth_options[x],
+            help="Higher depth = more detailed analysis but longer processing time."
         )
         if effort != st.session_state.reasoning_effort:
             st.session_state.reasoning_effort = effort
@@ -463,7 +475,7 @@ def render_step2():
 
 def render_step3():
     """Step 3: Evaluate and Score."""
-    version_label = "Multi-Agent (V2)" if st.session_state.scoring_version == "v2" else "Single Agent (V1)"
+    version_label = "Multi Agents (V2)" if st.session_state.scoring_version == "v2" else "Single Agent (V1)"
     st.header(f"Step 3: Evaluate & Score ({version_label})")
     st.markdown("Processing documents and analyzing the vendor proposal against RFP requirements.")
     
@@ -485,9 +497,9 @@ def render_step3():
             else:
                 st.warning("No scoring guide found. Using default evaluation criteria.")
     else:
-        with st.expander("🤖 Multi-Agent Scoring (V2)", expanded=False):
+        with st.expander("🤖 Multi Agents Scoring (V2)", expanded=False):
             st.info("""
-            **V2 Multi-Agent Scoring Process:**
+            **V2 Multi Agents Scoring Process:**
             
             1. **Agent 1 - Criteria Extraction**: Analyzes the RFP document to automatically 
                extract scoring criteria with weights (totaling 100%).
@@ -532,7 +544,10 @@ def render_step3():
 
 def run_evaluation_pipeline(scoring_guide: str):
     """Run the full evaluation pipeline with progress indicators, animations, and timing."""
-    logger.info("[%s] ====== EVALUATION PIPELINE STARTED ======", datetime.now().isoformat())
+    scoring_version = st.session_state.scoring_version
+    reasoning_effort = st.session_state.reasoning_effort
+    logger.info("====== EVALUATION PIPELINE STARTED (Version: %s, Effort: %s) ======", 
+               scoring_version.upper(), reasoning_effort)
     pipeline_start = time.time()
     
     # Inject animation CSS
@@ -554,9 +569,9 @@ def run_evaluation_pipeline(scoring_guide: str):
         timer_display = st.empty()
         
         try:
-            # Step 1: Process RFP
-            step1_start = time.time()
-            logger.info("[%s] STEP 1: Processing RFP document...", datetime.now().isoformat())
+            # Step 1: Process RFP and Proposal documents IN PARALLEL
+            docs_start = time.time()
+            logger.info("STEP 1: Processing documents in parallel (RFP + Proposal)...")
             
             step1_container.markdown("""
                 <div class="processing-container">
@@ -565,66 +580,114 @@ def run_evaluation_pipeline(scoring_guide: str):
                     <span class="duration-badge">⏱️ Running...</span>
                 </div>
             """, unsafe_allow_html=True)
-            step2_container.markdown("⬜ 2. Processing Proposal document...")
-            step3_container.markdown("⬜ 3. AI Reasoning & Scoring...")
-            status_text.text("📄 Extracting content from RFP document...")
-            progress_bar.progress(10)
-            
-            rfp_content, rfp_duration = asyncio.run(
-                process_document(
-                    st.session_state.rfp_file["bytes"],
-                    st.session_state.rfp_file["name"]
-                )
-            )
-            st.session_state.rfp_content = rfp_content
-            st.session_state.step_durations["rfp_processing"] = rfp_duration
-            
-            step1_container.markdown(f"✅ **1. Processing RFP document... Done!** `{format_duration(rfp_duration)}`")
-            logger.info("[%s] STEP 1 completed in %.2fs", datetime.now().isoformat(), rfp_duration)
-            progress_bar.progress(33)
-            
-            # Step 2: Process Proposal
-            step2_start = time.time()
-            logger.info("[%s] STEP 2: Processing Proposal document...", datetime.now().isoformat())
-            
             step2_container.markdown("""
                 <div class="processing-container">
                     <span class="spinner"></span>
                     <strong>2. Processing Proposal document...</strong>
-                    <span class="duration-badge">⏱️ Running...</span>
+                    <span class="duration-badge">⏱️ Running in parallel...</span>
                 </div>
             """, unsafe_allow_html=True)
-            status_text.text("📝 Extracting content from Proposal document...")
+            step3_container.markdown("⬜ 3. AI Reasoning & Scoring...")
+            status_text.text("📄📝 Processing both documents in parallel...")
+            progress_bar.progress(10)
             
-            proposal_content, proposal_duration = asyncio.run(
-                process_document(
+            # Process both documents concurrently using asyncio.gather
+            async def process_documents_parallel():
+                rfp_task = process_document(
+                    st.session_state.rfp_file["bytes"],
+                    st.session_state.rfp_file["name"]
+                )
+                proposal_task = process_document(
                     st.session_state.proposal_file["bytes"],
                     st.session_state.proposal_file["name"]
                 )
-            )
-            st.session_state.proposal_content = proposal_content
-            st.session_state.step_durations["proposal_processing"] = proposal_duration
+                return await asyncio.gather(rfp_task, proposal_task)
             
+            (rfp_content, rfp_duration), (proposal_content, proposal_duration) = asyncio.run(
+                process_documents_parallel()
+            )
+            
+            # Calculate parallel processing stats
+            docs_total_duration = time.time() - docs_start
+            time_saved = (rfp_duration + proposal_duration) - docs_total_duration
+            
+            st.session_state.rfp_content = rfp_content
+            st.session_state.proposal_content = proposal_content
+            st.session_state.step_durations["rfp_processing"] = rfp_duration
+            st.session_state.step_durations["proposal_processing"] = proposal_duration
+            st.session_state.step_durations["docs_parallel_total"] = docs_total_duration
+            st.session_state.step_durations["parallel_time_saved"] = time_saved
+            
+            step1_container.markdown(f"✅ **1. Processing RFP document... Done!** `{format_duration(rfp_duration)}`")
             step2_container.markdown(f"✅ **2. Processing Proposal document... Done!** `{format_duration(proposal_duration)}`")
-            logger.info("[%s] STEP 2 completed in %.2fs", datetime.now().isoformat(), proposal_duration)
-            progress_bar.progress(66)
+            logger.info("STEP 1-2 completed in %.2fs (parallel) - RFP: %.2fs, Proposal: %.2fs, Time saved: %.2fs", 
+                       docs_total_duration, rfp_duration, proposal_duration, time_saved)
+            progress_bar.progress(50)
             
             # Step 3: Scoring with AI Reasoning
             step3_start = time.time()
             scoring_version = st.session_state.scoring_version
             
+            # For V2, we have two sub-steps: extraction and scoring
+            step3a_container = st.empty()  # Criteria extraction (V2 only)
+            step3b_container = st.empty()  # Proposal scoring (V2) or combined scoring (V1)
+            
             if scoring_version == "v2":
-                logger.info("[%s] STEP 3: Multi-Agent Scoring (V2)...", datetime.now().isoformat())
-                step3_container.markdown("""
+                logger.info("STEP 3: Multi-Agent Scoring (V2)...")
+                
+                # Show V2 sub-steps
+                step3_container.markdown("**3. AI Evaluation (Multi Agents V2)**")
+                step3a_container.markdown("""
                     <div class="processing-container">
                         <span class="spinner"></span>
-                        <strong>3. Multi-Agent Scoring (V2)...</strong>
-                        <span class="duration-badge">🤖 Extracting criteria & scoring...</span>
+                        <strong>3a. Extracting scoring criteria from RFP...</strong>
+                        <span class="duration-badge">🔍 Analyzing requirements...</span>
                     </div>
                 """, unsafe_allow_html=True)
-                status_text.text("🤖 Agent 1: Extracting scoring criteria from RFP...")
+                step3b_container.markdown("⬜ 3b. Scoring proposal against criteria...")
+                status_text.text("🔍 Agent 1: Analyzing RFP to extract evaluation criteria...")
+                
+                # Track V2 phase durations
+                phase1_duration = 0
+                phase2_duration = 0
+                
+                def v2_progress_callback(phase_message: str):
+                    nonlocal phase1_duration
+                    if "Phase 2" in phase_message or "Scoring" in phase_message:
+                        # Phase 1 complete, update UI for phase 2
+                        phase1_duration = time.time() - step3_start
+                        step3a_container.markdown(f"✅ **3a. Extracting criteria... Done!** `{format_duration(phase1_duration)}`")
+                        step3b_container.markdown("""
+                            <div class="processing-container">
+                                <span class="spinner"></span>
+                                <strong>3b. Scoring proposal against criteria...</strong>
+                                <span class="duration-badge">📊 Evaluating proposal...</span>
+                            </div>
+                        """, unsafe_allow_html=True)
+                        status_text.text("📊 Agent 2: Evaluating proposal against extracted criteria...")
+                        progress_bar.progress(75)
+                
+                results, scoring_duration = asyncio.run(
+                    evaluate_proposal(
+                        st.session_state.rfp_content,
+                        st.session_state.proposal_content,
+                        scoring_guide,
+                        version=scoring_version,
+                        reasoning_effort=st.session_state.reasoning_effort,
+                        progress_callback=v2_progress_callback
+                    )
+                )
+                
+                # Get actual phase durations from metadata
+                metadata = results.get("_metadata", {})
+                phase1_actual = metadata.get("phase1_criteria_extraction_seconds", phase1_duration)
+                phase2_actual = metadata.get("phase2_proposal_scoring_seconds", 0)
+                
+                step3a_container.markdown(f"✅ **3a. Extracting criteria... Done!** `{format_duration(phase1_actual)}`")
+                step3b_container.markdown(f"✅ **3b. Scoring proposal... Done!** `{format_duration(phase2_actual)}`")
+                
             else:
-                logger.info("[%s] STEP 3: AI Reasoning & Scoring (V1)...", datetime.now().isoformat())
+                logger.info("STEP 3: AI Reasoning & Scoring (V1)...")
                 step3_container.markdown("""
                     <div class="processing-container">
                         <span class="spinner"></span>
@@ -633,40 +696,45 @@ def run_evaluation_pipeline(scoring_guide: str):
                     </div>
                 """, unsafe_allow_html=True)
                 status_text.text("🧠 AI Agent is performing deep reasoning analysis (this may take a moment)...")
-            
-            results, scoring_duration = asyncio.run(
-                evaluate_proposal(
-                    st.session_state.rfp_content,
-                    st.session_state.proposal_content,
-                    scoring_guide,
-                    version=scoring_version,
-                    reasoning_effort=st.session_state.reasoning_effort
+                
+                results, scoring_duration = asyncio.run(
+                    evaluate_proposal(
+                        st.session_state.rfp_content,
+                        st.session_state.proposal_content,
+                        scoring_guide,
+                        version=scoring_version,
+                        reasoning_effort=st.session_state.reasoning_effort
+                    )
                 )
-            )
+                
+                step3_container.markdown(f"✅ **3. AI Scoring (V1)... Done!** `{format_duration(scoring_duration)}`")
+            
             st.session_state.scoring_results = results
             st.session_state.step_durations["scoring"] = scoring_duration
             
-            version_label = "V2" if scoring_version == "v2" else "V1"
-            step3_container.markdown(f"✅ **3. AI Scoring ({version_label})... Done!** `{format_duration(scoring_duration)}`")
-            logger.info("[%s] STEP 3 completed in %.2fs", datetime.now().isoformat(), scoring_duration)
+            logger.info("STEP 3 completed in %.2fs", scoring_duration)
             progress_bar.progress(100)
             
             # Calculate total duration
             total_duration = time.time() - pipeline_start
             st.session_state.step_durations["total"] = total_duration
             
-            logger.info("[%s] ====== EVALUATION PIPELINE COMPLETED ======", datetime.now().isoformat())
-            logger.info("[%s] Total pipeline duration: %.2fs", datetime.now().isoformat(), total_duration)
-            logger.info("[%s] Breakdown - RFP: %.2fs, Proposal: %.2fs, Scoring: %.2fs",
-                       datetime.now().isoformat(), rfp_duration, proposal_duration, scoring_duration)
+            # Calculate time saved from parallel processing
+            time_saved = st.session_state.step_durations.get("parallel_time_saved", 0)
             
-            status_text.success(f"✨ Evaluation complete! Total time: {format_duration(total_duration)}")
+            logger.info("====== EVALUATION PIPELINE COMPLETED ======")
+            logger.info("Total pipeline duration: %.2fs", total_duration)
+            logger.info("Breakdown - Docs (parallel): %.2fs (RFP: %.2fs, Proposal: %.2fs, Saved: %.2fs), Scoring: %.2fs",
+                       docs_total_duration, rfp_duration, proposal_duration, time_saved, scoring_duration)
+            
+            saved_msg = f" (saved {format_duration(time_saved)} with parallel processing)" if time_saved > 1 else ""
+            status_text.success(f"✨ Evaluation complete! Total time: {format_duration(total_duration)}{saved_msg}")
             
             # Clear progress indicators after a moment
             st.rerun()
             
         except Exception as e:
-            logger.error("[%s] Pipeline failed with error: %s", datetime.now().isoformat(), str(e))
+            logger.error("Pipeline failed with error: %s", str(e))
             status_text.empty()
             st.error(f"Error during evaluation: {str(e)}")
 
@@ -829,11 +897,15 @@ def render_results_v2(results: dict):
 
 def render_timing_summary_v2(durations: dict, results: dict):
     """Render timing summary for V2 multi-agent evaluation."""
-    st.subheader("⏱️ Multi-Agent Evaluation Timing")
+    st.subheader("⏱️ Multi Agents Evaluation Timing")
     
     metadata = results.get("_metadata", {})
+    time_saved = durations.get("parallel_time_saved", 0)
+    docs_parallel_total = durations.get("docs_parallel_total", 0)
     
-    col1, col2, col3, col4, col5 = st.columns(5)
+    # Row 1: Document processing
+    st.markdown("**Document Processing** (parallel)")
+    col1, col2, col3 = st.columns(3)
     
     with col1:
         rfp_time = durations.get("rfp_processing", 0)
@@ -844,16 +916,34 @@ def render_timing_summary_v2(durations: dict, results: dict):
         st.metric(label="📝 Proposal Processing", value=format_duration(proposal_time))
     
     with col3:
+        st.metric(
+            label="⚡ Parallel Total", 
+            value=format_duration(docs_parallel_total),
+            delta=f"-{format_duration(time_saved)} saved" if time_saved > 1 else None,
+            delta_color="inverse"
+        )
+    
+    # Row 2: AI Scoring phases
+    st.markdown("**AI Evaluation** (multi agents)")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
         phase1_time = metadata.get("phase1_criteria_extraction_seconds", 0)
-        st.metric(label="🔍 Criteria Extraction", value=format_duration(phase1_time))
+        criteria_count = metadata.get("criteria_count", 0)
+        st.metric(
+            label="🔍 3a. Criteria Extraction", 
+            value=format_duration(phase1_time),
+            delta=f"{criteria_count} criteria" if criteria_count else None,
+            delta_color="off"
+        )
     
-    with col4:
+    with col2:
         phase2_time = metadata.get("phase2_proposal_scoring_seconds", 0)
-        st.metric(label="📊 Proposal Scoring", value=format_duration(phase2_time))
+        st.metric(label="📊 3b. Proposal Scoring", value=format_duration(phase2_time))
     
-    with col5:
+    with col3:
         total_time = durations.get("total", 0)
-        st.metric(label="⏱️ Total Time", value=format_duration(total_time))
+        st.metric(label="⏱️ Total Pipeline", value=format_duration(total_time))
     
     if metadata:
         with st.expander("🔍 Detailed Timing & Model Info", expanded=False):
@@ -865,13 +955,15 @@ def render_timing_summary_v2(durations: dict, results: dict):
                 - Type: `{metadata.get('evaluation_type', 'N/A')}`
                 - Timestamp: `{metadata.get('evaluation_timestamp', 'N/A')}`
                 - Model: `{metadata.get('model_deployment', 'N/A')}`
+                - Analysis Depth: `{metadata.get('reasoning_effort', 'N/A')}`
                 """)
             with col2:
                 st.markdown(f"""
-                **Multi-Agent Timing:**
-                - Criteria Extraction: `{format_duration(metadata.get('phase1_criteria_extraction_seconds', 0))}`
-                - Proposal Scoring: `{format_duration(metadata.get('phase2_proposal_scoring_seconds', 0))}`
+                **Multi Agents Timing:**
+                - Criteria Extraction (Agent 1): `{format_duration(metadata.get('phase1_criteria_extraction_seconds', 0))}`
+                - Proposal Scoring (Agent 2): `{format_duration(metadata.get('phase2_proposal_scoring_seconds', 0))}`
                 - Criteria Found: `{metadata.get('criteria_count', 0)}`
+                - Time Saved (parallel docs): `{format_duration(time_saved)}`
                 """)
     
     st.markdown("---")
@@ -999,7 +1091,7 @@ def generate_score_report_v2(results: dict) -> str:
     grade_badge = grade_badges.get(grade, "⚪ **UNKNOWN**")
     
     # Build the report
-    report = f"""# 📊 RFP Evaluation Report (V2 - Multi-Agent)
+    report = f"""# 📊 RFP Evaluation Report (V2 - Multi Agents)
 
 ---
 
@@ -1213,7 +1305,7 @@ def generate_score_report_v2(results: dict) -> str:
 | **Proposal Scoring (Agent 2)** | {phase2} |
 | **Total Evaluation Time** | {total_eval} |
 | **Model Deployment** | {metadata.get('model_deployment', 'N/A')} |
-| **Reasoning Effort** | {metadata.get('reasoning_effort', 'N/A')} |
+| **Analysis Depth** | {metadata.get('reasoning_effort', 'N/A')} |
 """
     
     return report
@@ -1225,6 +1317,10 @@ def render_timing_summary(durations: dict, results: dict):
     
     # Get metadata from results if available
     metadata = results.get("_metadata", {})
+    
+    # Check if parallel processing was used
+    time_saved = durations.get("parallel_time_saved", 0)
+    docs_parallel_total = durations.get("docs_parallel_total", 0)
     
     col1, col2, col3, col4 = st.columns(4)
     
@@ -1259,8 +1355,14 @@ def render_timing_summary(durations: dict, results: dict):
         st.metric(
             label="⏱️ Total Time",
             value=format_duration(total_time),
+            delta=f"-{format_duration(time_saved)} saved" if time_saved > 1 else None,
+            delta_color="inverse",
             help="Total evaluation pipeline duration"
         )
+    
+    # Show parallel processing info
+    if time_saved > 1:
+        st.success(f"⚡ **Parallel Processing:** Documents processed simultaneously in {format_duration(docs_parallel_total)} (saved {format_duration(time_saved)})")
     
     # Additional metadata details
     if metadata:
@@ -1271,7 +1373,7 @@ def render_timing_summary(durations: dict, results: dict):
                 **Evaluation Details:**
                 - Timestamp: `{metadata.get('evaluation_timestamp', 'N/A')}`
                 - Model: `{metadata.get('model_deployment', 'N/A')}`
-                - Reasoning Effort: `{metadata.get('reasoning_effort', 'N/A')}`
+                - Analysis Depth: `{metadata.get('reasoning_effort', 'N/A')}`
                 """)
             with detail_col2:
                 api_duration = metadata.get('api_call_duration_seconds', 0)
@@ -1552,7 +1654,7 @@ def generate_score_report(results: dict) -> str:
 |--------|-------|
 | **Evaluation Timestamp** | {metadata.get('evaluation_timestamp', 'N/A')} |
 | **Model Deployment** | {metadata.get('model_deployment', 'N/A')} |
-| **Reasoning Effort** | {metadata.get('reasoning_effort', 'N/A')} |
+| **Analysis Depth** | {metadata.get('reasoning_effort', 'N/A')} |
 | **API Call Duration** | {api_duration} |
 | **Total Evaluation Time** | {total_eval_duration} |
 """

@@ -167,7 +167,7 @@ You MUST respond with a valid JSON object matching this exact structure:
 
     def __init__(self):
         """Initialize the criteria extraction agent."""
-        logger.info("[%s] Initializing CriteriaExtractionAgent...", datetime.now().isoformat())
+        logger.info("Initializing CriteriaExtractionAgent...")
         
         self._validate_config()
         
@@ -182,7 +182,7 @@ You MUST respond with a valid JSON object matching this exact structure:
         )
         
         self.deployment_name = deployment_name
-        logger.info("[%s] CriteriaExtractionAgent initialized", datetime.now().isoformat())
+        logger.info("CriteriaExtractionAgent initialized")
     
     def _validate_config(self):
         """Validate required configuration."""
@@ -209,7 +209,7 @@ You MUST respond with a valid JSON object matching this exact structure:
             ExtractedCriteria object with all identified criteria
         """
         start_time = time.time()
-        logger.info("[%s] Starting criteria extraction (effort: %s)...", datetime.now().isoformat(), reasoning_effort)
+        logger.info("Starting criteria extraction (effort: %s)...", reasoning_effort)
         
         if progress_callback:
             progress_callback("Analyzing RFP structure and requirements...")
@@ -246,8 +246,7 @@ Respond with ONLY valid JSON matching the schema in your instructions."""
             # Log token usage
             usage = result.usage_details
             if usage:
-                logger.info("[%s] Criteria extraction - Tokens: Input=%d, Output=%d, Total=%d",
-                           datetime.now().isoformat(),
+                logger.info("Criteria extraction - Tokens: Input=%d, Output=%d, Total=%d",
                            usage.input_token_count or 0,
                            usage.output_token_count or 0,
                            usage.total_token_count or 0)
@@ -256,13 +255,13 @@ Respond with ONLY valid JSON matching the schema in your instructions."""
             criteria_data = self._parse_response(response_text)
             
             duration = time.time() - start_time
-            logger.info("[%s] Criteria extraction completed in %.2fs - Found %d criteria",
-                       datetime.now().isoformat(), duration, len(criteria_data.get("criteria", [])))
+            logger.info("Criteria extraction completed in %.2fs - Found %d criteria",
+                       duration, len(criteria_data.get("criteria", [])))
             
             return ExtractedCriteria(**criteria_data)
             
         except Exception as e:
-            logger.error("[%s] Criteria extraction failed: %s", datetime.now().isoformat(), str(e))
+            logger.error("Criteria extraction failed: %s", str(e))
             raise
     
     def _parse_response(self, response_text: str) -> dict:
@@ -287,8 +286,7 @@ Respond with ONLY valid JSON matching the schema in your instructions."""
             
             # Normalize if weights don't sum to 100
             if criteria and abs(total_weight - 100) > 0.1:
-                logger.warning("[%s] Normalizing weights from %.2f to 100", 
-                              datetime.now().isoformat(), total_weight)
+                logger.warning("Normalizing weights from %.2f to 100", total_weight)
                 for criterion in criteria:
                     criterion["weight"] = (criterion.get("weight", 0) / total_weight) * 100
                 data["total_weight"] = 100.0
@@ -296,7 +294,7 @@ Respond with ONLY valid JSON matching the schema in your instructions."""
             return data
             
         except json.JSONDecodeError as e:
-            logger.error("[%s] Failed to parse criteria JSON: %s", datetime.now().isoformat(), str(e))
+            logger.error("Failed to parse criteria JSON: %s", str(e))
             # Return default structure
             return {
                 "rfp_title": "Unknown RFP",
@@ -397,7 +395,7 @@ You MUST respond with a valid JSON object:
 
     def __init__(self):
         """Initialize the proposal scoring agent."""
-        logger.info("[%s] Initializing ProposalScoringAgent...", datetime.now().isoformat())
+        logger.info("Initializing ProposalScoringAgent...")
         
         self._validate_config()
         
@@ -412,7 +410,7 @@ You MUST respond with a valid JSON object:
         )
         
         self.deployment_name = deployment_name
-        logger.info("[%s] ProposalScoringAgent initialized", datetime.now().isoformat())
+        logger.info("ProposalScoringAgent initialized")
     
     def _validate_config(self):
         """Validate required configuration."""
@@ -441,8 +439,8 @@ You MUST respond with a valid JSON object:
             ProposalEvaluationV2 with complete scoring results
         """
         start_time = time.time()
-        logger.info("[%s] Starting proposal scoring against %d criteria (effort: %s)...",
-                   datetime.now().isoformat(), len(criteria.criteria), reasoning_effort)
+        logger.info("Starting proposal scoring against %d criteria (effort: %s)...",
+                   len(criteria.criteria), reasoning_effort)
         
         if progress_callback:
             progress_callback("Preparing scoring framework...")
@@ -502,8 +500,7 @@ Respond with ONLY valid JSON matching the schema in your instructions."""
             # Log token usage
             usage = result.usage_details
             if usage:
-                logger.info("[%s] Proposal scoring - Tokens: Input=%d, Output=%d, Total=%d",
-                           datetime.now().isoformat(),
+                logger.info("Proposal scoring - Tokens: Input=%d, Output=%d, Total=%d",
                            usage.input_token_count or 0,
                            usage.output_token_count or 0,
                            usage.total_token_count or 0)
@@ -512,13 +509,13 @@ Respond with ONLY valid JSON matching the schema in your instructions."""
             evaluation_data = self._parse_response(response_text, criteria)
             
             duration = time.time() - start_time
-            logger.info("[%s] Proposal scoring completed in %.2fs - Total score: %.2f",
-                       datetime.now().isoformat(), duration, evaluation_data.get("total_score", 0))
+            logger.info("Proposal scoring completed in %.2fs - Total score: %.2f",
+                       duration, evaluation_data.get("total_score", 0))
             
             return ProposalEvaluationV2(**evaluation_data)
             
         except Exception as e:
-            logger.error("[%s] Proposal scoring failed: %s", datetime.now().isoformat(), str(e))
+            logger.error("Proposal scoring failed: %s", str(e))
             raise
     
     def _parse_response(self, response_text: str, criteria: ExtractedCriteria) -> dict:
@@ -562,7 +559,7 @@ Respond with ONLY valid JSON matching the schema in your instructions."""
             return data
             
         except json.JSONDecodeError as e:
-            logger.error("[%s] Failed to parse scoring JSON: %s", datetime.now().isoformat(), str(e))
+            logger.error("Failed to parse scoring JSON: %s", str(e))
             # Return default structure
             return {
                 "rfp_title": criteria.rfp_title,
@@ -598,13 +595,12 @@ class ScoringAgentV2:
     
     def __init__(self):
         """Initialize the V2 scoring system."""
-        logger.info("[%s] Initializing ScoringAgentV2 (Multi-Agent System)...", 
-                   datetime.now().isoformat())
+        logger.info("Initializing ScoringAgentV2 (Multi-Agent System)...")
         
         self.criteria_agent = CriteriaExtractionAgent()
         self.scoring_agent = ProposalScoringAgent()
         
-        logger.info("[%s] ScoringAgentV2 initialized with 2 agents", datetime.now().isoformat())
+        logger.info("ScoringAgentV2 initialized with 2 agents")
     
     async def evaluate(
         self,
@@ -628,8 +624,7 @@ class ScoringAgentV2:
             Dictionary containing complete evaluation results with metadata
         """
         total_start = time.time()
-        logger.info("[%s] ====== V2 MULTI-AGENT EVALUATION STARTED (effort: %s) ======", 
-                   datetime.now().isoformat(), reasoning_effort)
+        logger.info("====== V2 MULTI-AGENT EVALUATION STARTED (effort: %s) ======", reasoning_effort)
         
         # Phase 1: Extract criteria from RFP
         phase1_start = time.time()
@@ -643,8 +638,8 @@ class ScoringAgentV2:
         )
         phase1_duration = time.time() - phase1_start
         
-        logger.info("[%s] Phase 1 completed in %.2fs - Extracted %d criteria",
-                   datetime.now().isoformat(), phase1_duration, len(criteria.criteria))
+        logger.info("Phase 1 completed in %.2fs - Extracted %d criteria",
+                   phase1_duration, len(criteria.criteria))
         
         # Phase 2: Score the proposal
         phase2_start = time.time()
@@ -659,8 +654,8 @@ class ScoringAgentV2:
         )
         phase2_duration = time.time() - phase2_start
         
-        logger.info("[%s] Phase 2 completed in %.2fs - Total score: %.2f",
-                   datetime.now().isoformat(), phase2_duration, evaluation.total_score)
+        logger.info("Phase 2 completed in %.2fs - Total score: %.2f",
+                   phase2_duration, evaluation.total_score)
         
         # Compile final results
         total_duration = time.time() - total_start
@@ -734,9 +729,8 @@ class ScoringAgentV2:
             }
         }
         
-        logger.info("[%s] ====== V2 MULTI-AGENT EVALUATION COMPLETED ======", 
-                   datetime.now().isoformat())
-        logger.info("[%s] Total duration: %.2fs (Phase 1: %.2fs, Phase 2: %.2fs)",
-                   datetime.now().isoformat(), total_duration, phase1_duration, phase2_duration)
+        logger.info("====== V2 MULTI-AGENT EVALUATION COMPLETED ======")
+        logger.info("Total duration: %.2fs (Phase 1: %.2fs, Phase 2: %.2fs)",
+                   total_duration, phase1_duration, phase2_duration)
         
         return results
