@@ -5,6 +5,7 @@ This module provides a client for Azure Document Intelligence service
 that extracts markdown content including text, tables, images, and charts.
 """
 
+import asyncio
 import os
 import logging
 import time
@@ -13,7 +14,7 @@ from typing import Optional
 from azure.ai.documentintelligence import DocumentIntelligenceClient
 from azure.ai.documentintelligence.models import (
     AnalyzeDocumentRequest,
-    ContentFormat,
+    DocumentContentFormat,
     AnalyzeResult,
     DocumentAnalysisFeature,
 )
@@ -111,7 +112,7 @@ class AzureDocumentIntelligenceClient:
                 model_id="prebuilt-layout",
                 body=file_bytes,
                 content_type="application/octet-stream",
-                output_content_format=ContentFormat.MARKDOWN,
+                output_content_format=DocumentContentFormat.MARKDOWN,
                 features=features if features else None
             )
             
@@ -221,8 +222,6 @@ class AzureDocumentIntelligenceClient:
         Returns:
             Extracted content as markdown string
         """
-        import asyncio
-        
         # Run the blocking API call in a thread pool
         return await asyncio.to_thread(
             self.analyze_document, 
