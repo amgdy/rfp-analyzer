@@ -1,8 +1,11 @@
 """
-Document Processing Service using Azure Content Understanding.
+Document Processing Service using Azure AI Services.
 
-This module handles document processing and extraction using Azure Content Understanding
-to convert various document formats to markdown.
+This module handles document processing and extraction using either:
+- Azure Content Understanding (default)
+- Azure Document Intelligence
+
+Both services convert various document formats to markdown.
 """
 
 import os
@@ -10,10 +13,13 @@ import logging
 import time
 import uuid
 from datetime import datetime
+from enum import Enum
+from typing import Optional
 from azure.identity import DefaultAzureCredential
 from dotenv import load_dotenv
 
 from .content_understanding_client import AzureContentUnderstandingClient
+from .document_intelligence_client import AzureDocumentIntelligenceClient
 
 load_dotenv()
 
@@ -26,18 +32,47 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+class ExtractionService(str, Enum):
+    """Available document extraction services."""
+    CONTENT_UNDERSTANDING = "content_understanding"
+    DOCUMENT_INTELLIGENCE = "document_intelligence"
+
+
 class DocumentProcessor:
     """
-    Document processor using Azure Content Understanding.
+    Document processor using Azure AI Services.
+    
+    Supports multiple extraction backends:
+    - Azure Content Understanding
+    - Azure Document Intelligence
     
     Processes various document formats and extracts content as markdown.
     """
     
-    def __init__(self):
-        """Initialize the document processor with Azure credentials."""
-        logger.info("Initializing DocumentProcessor...")
+    def __init__(self, service: ExtractionService = ExtractionService.CONTENT_UNDERSTANDING):
+        """
+        Initialize the document processor with specified service.
+        
+        Args:
+            service: The extraction service to use (default: Content Understanding)
+        """
+        logger.info("Initializing DocumentProcessor with service: %s...", service.value)
         init_start = time.time()
         
+        self.service = service
+        self.cu_client: Optional[AzureContentUnderstandingClient] = None
+        self.di_client: Optional[AzureDocumentIntelligenceClient] = None
+        
+        if service == ExtractionService.CONTENT_UNDERSTANDING:
+            self._init_content_understanding()
+        else:
+            self._init_document_intelligence()
+        
+        init_duration = time.time() - init_start
+        logger.info("DocumentProcessor initialized in %.2fs", init_duration)
+    
+    def _init_content_understanding(self):
+        """Initialize Azure Content Understanding client."""
         self.endpoint = os.getenv("AZURE_AI_ENDPOINT")
         
         if not self.endpoint:
@@ -59,19 +94,22 @@ class DocumentProcessor:
         auth_method = "API Key" if api_key else "Azure AD Token"
         logger.info("Authentication method: %s", auth_method)
         
-        self.client = AzureContentUnderstandingClient(
+        self.cu_client = AzureContentUnderstandingClient(
             endpoint=self.endpoint,
             api_version="2025-11-01",
             subscription_key=api_key,
             token_provider=token_provider if not api_key else None,
         )
-        
-        init_duration = time.time() - init_start
-        logger.info("DocumentProcessor initialized in %.2fs", init_duration)
+    
+    def _init_document_intelligence(self):
+        """Initialize Azure Document Intelligence client."""
+        self.di_client = AzureDocumentIntelligenceClient()
     
     async def extract_content(self, file_bytes: bytes, filename: str) -> str:
         """
         Extract content from a document and return as markdown.
+        
+        Uses the configured extraction service (Content Understanding or Document Intelligence).
         
         Args:
             file_bytes: The document content as bytes
@@ -85,8 +123,8 @@ class DocumentProcessor:
         # Generate unique request ID for tracking this extraction
         request_id = str(uuid.uuid4())[:8]
         extract_start = time.time()
-        logger.info("[REQ:%s] Starting content extraction for: %s (%d bytes)", 
-                   request_id, filename, len(file_bytes))
+        logger.info("[REQ:%s] Starting content extraction for: %s (%d bytes) using %s", 
+                   request_id, filename, len(file_bytes), self.service.value)
         
         # Determine content type based on filename extension
         extension = filename.lower().split(".")[-1] if "." in filename else ""
@@ -101,18 +139,22 @@ class DocumentProcessor:
                        request_id, duration, len(content))
             return content
         
-        # Use Azure Content Understanding for other formats (PDF, DOCX, etc.)
-        # Run the blocking API call in a thread pool to enable true parallelism
-        logger.info("[REQ:%s] Processing with Azure Content Understanding (format: %s)...", 
-                   request_id, extension)
-        content = await asyncio.to_thread(self._analyze_document, file_bytes, request_id)
+        # Use the configured extraction service
+        if self.service == ExtractionService.CONTENT_UNDERSTANDING:
+            logger.info("[REQ:%s] Processing with Azure Content Understanding (format: %s)...", 
+                       request_id, extension)
+            content = await asyncio.to_thread(self._analyze_with_content_understanding, file_bytes, request_id)
+        else:
+            logger.info("[REQ:%s] Processing with Azure Document Intelligence (format: %s)...", 
+                       request_id, extension)
+            content = await self.di_client.analyze_document_async(file_bytes, request_id)
         
         duration = time.time() - extract_start
         logger.info("[REQ:%s] ✅ Document extraction completed in %.3fs (%d chars)", 
                    request_id, duration, len(content))
         return content
     
-    def _analyze_document(self, file_bytes: bytes, request_id: str = "unknown") -> str:
+    def _analyze_with_content_understanding(self, file_bytes: bytes, request_id: str = "unknown") -> str:
         """
         Analyze document using Azure Content Understanding.
         
@@ -129,13 +171,13 @@ class DocumentProcessor:
         # Use the prebuilt-documentSearch analyzer for document analysis
         # This extracts text, tables, and structure from documents as markdown
         api_call_start = time.time()
-        response = self.client.begin_analyze_binary_bytes(analyzer_id="prebuilt-documentSearch", file_bytes=file_bytes)
+        response = self.cu_client.begin_analyze_binary_bytes(analyzer_id="prebuilt-documentSearch", file_bytes=file_bytes)
         api_call_duration = time.time() - api_call_start
         logger.info("[REQ:%s] API call initiated in %.3fs", request_id, api_call_duration)
         
         logger.info("[REQ:%s] ⏳ Polling for analysis result...", request_id)
         poll_start = time.time()
-        result = self.client.poll_result(response)
+        result = self.cu_client.poll_result(response)
         poll_duration = time.time() - poll_start
         logger.info("[REQ:%s] ✅ Polling completed in %.3fs", request_id, poll_duration)
 

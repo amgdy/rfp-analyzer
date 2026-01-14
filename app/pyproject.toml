@@ -16,6 +16,7 @@ dependencies = [
     "azure-monitor-opentelemetry>=1.8.3",
     "opentelemetry-sdk>=1.39.0",
     "azure-core-tracing-opentelemetry>=1.0.0b12",
+    "python-docx>=1.1.0",
 ]
 
 [project.optional-dependencies]

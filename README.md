@@ -1,16 +1,31 @@
 # RFP Analyzer
 
-A Streamlit-based POC application for analyzing RFPs (Request for Proposals) and scoring vendor proposals using Azure AI services.
+A Streamlit-based POC application for analyzing RFPs (Request for Proposals) and scoring multiple vendor proposals using Azure AI services.
 
 ## Features
 
 - **3-Step Workflow:**
-  1. Upload and process RFP documents
-  2. Upload and process Vendor Proposals
-  3. AI-powered evaluation and scoring
+  1. Upload RFP document and multiple vendor proposals
+  2. Configure extraction service and extract content
+  3. AI-powered evaluation, scoring, and multi-vendor comparison
 
-- **Azure Content Understanding**: Extracts text and structure from PDF, Word, and other document formats
-- **Microsoft Agent Framework**: Intelligent evaluation using Azure OpenAI
+- **Document Extraction Options:**
+  - Azure Content Understanding
+  - Azure Document Intelligence
+
+- **Multi-Agent Evaluation:**
+  - Criteria Extraction Agent - Automatically extracts scoring criteria from RFP
+  - Proposal Scoring Agent - Evaluates each vendor against criteria
+  - Comparison Agent - Compares and ranks all vendors
+
+- **Evaluation Modes:**
+  - Individual scoring - Score each proposal separately
+  - Combined scoring - Evaluate all proposals together
+
+- **Export Options:**
+  - CSV comparison reports with all metrics
+  - Word document reports for each vendor
+  - JSON data export
 
 ## Prerequisites
 
@@ -18,7 +33,7 @@ A Streamlit-based POC application for analyzing RFPs (Request for Proposals) and
 - [UV](https://docs.astral.sh/uv/) package manager
 - Azure subscription with:
   - Azure OpenAI resource (with a deployed model like `gpt-4o-mini`)
-  - Azure Document Intelligence resource
+  - Azure Content Understanding resource OR Azure Document Intelligence resource
 
 ## Setup
 
@@ -35,7 +50,8 @@ A Streamlit-based POC application for analyzing RFPs (Request for Proposals) and
    Edit `.env` with your Azure credentials:
    - `AZURE_OPENAI_ENDPOINT`: Your Azure OpenAI endpoint
    - `AZURE_OPENAI_DEPLOYMENT_NAME`: Your deployed model name
-   - `AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT`: Your Document Intelligence endpoint
+   - `AZURE_AI_ENDPOINT`: Your Azure AI/Content Understanding endpoint
+   - `AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT`: (Optional) Your Document Intelligence endpoint
 
 3. **Authenticate with Azure:**
    ```bash
@@ -107,34 +123,36 @@ rfp-analyzer/
     ├── uv.lock                    # Lock file
     ├── Dockerfile                 # Docker image definition
     ├── docker-compose.yml         # Docker Compose config
-    ├── scoring_guide.md           # Evaluation criteria
+    ├── scoring_guide.md           # Default evaluation criteria
     └── services/
-        ├── document_processor.py  # Azure Content Understanding
-        ├── scoring_agent.py       # V1 Single Agent scoring
-        └── scoring_agent_v2.py    # V2 Multi Agents scoring
+        ├── document_processor.py  # Document extraction orchestrator
+        ├── content_understanding_client.py  # Azure Content Understanding
+        ├── document_intelligence_client.py  # Azure Document Intelligence
+        ├── scoring_agent.py       # V1 Single Agent scoring (legacy)
+        ├── scoring_agent_v2.py    # V2 Multi-Agent scoring
+        └── comparison_agent.py    # Multi-vendor comparison
 ```
 
 ## Customization
 
 ### Scoring Guide
-Edit `app/scoring_guide.md` to customize evaluation criteria and weights.
+Edit `app/scoring_guide.md` to customize default evaluation criteria and weights.
 
 ### Document Processing
-The `DocumentProcessor` class uses Azure Document Intelligence's `prebuilt-layout` model. You can modify this in `app/services/document_processor.py`.
+Choose between Azure Content Understanding and Azure Document Intelligence in the sidebar.
 
 ### AI Agent
-The `ScoringAgent` uses Microsoft Agent Framework with Azure OpenAI. Customize the evaluation logic in `app/services/scoring_agent.py`.
+The evaluation uses a multi-agent architecture powered by Azure OpenAI. Customize the evaluation logic in `app/services/scoring_agent_v2.py`.
 
 ## Dependencies
 
 - `streamlit` - Web application framework
-- `agent-framework-azure-ai` - Microsoft Agent Framework (preview)
-- `azure-ai-documentintelligence` - Azure Content Understanding
+- `agent-framework` - Microsoft Agent Framework
+- `azure-ai-documentintelligence` - Azure Document Intelligence
 - `azure-identity` - Azure authentication
 - `python-dotenv` - Environment configuration
 - `pydantic` - Data validation
-
-> **Note:** The `agent-framework-azure-ai` package is in preview. The `--pre` flag is required for installation.
+- `python-docx` - Word document generation
 
 ## License
 
