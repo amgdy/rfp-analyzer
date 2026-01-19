@@ -95,7 +95,7 @@ class ProcessingQueue:
     start_time: Optional[float] = None
     end_time: Optional[float] = None
     
-    def add_item(self, id: str, name: str, item_type: str, metadata: Dict[str, Any] = None) -> QueueItem:
+    def add_item(self, id: str, name: str, item_type: str, metadata: Optional[Dict[str, Any]] = None) -> QueueItem:
         """Add an item to the queue."""
         item = QueueItem(
             id=id,
