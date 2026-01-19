@@ -42,6 +42,7 @@ os.environ["AZURE_TRACING_GEN_AI_CONTENT_RECORDING_ENABLED"] = "true" # False by
 from services.document_processor import DocumentProcessor, ExtractionService
 from services.scoring_agent_v2 import ScoringAgentV2
 from services.comparison_agent import ComparisonAgent, generate_word_report, generate_full_analysis_report
+from services.processing_queue import ProcessingQueue, QueueItem, QueueItemStatus, format_duration as queue_format_duration
 
 # Optional PDF support
 try:
@@ -234,6 +235,11 @@ if "global_criteria" not in st.session_state:
     st.session_state.global_criteria = ""
 if "reasoning_effort" not in st.session_state:
     st.session_state.reasoning_effort = "low"
+# Queue states for tracking progress
+if "extraction_queue" not in st.session_state:
+    st.session_state.extraction_queue = None
+if "scoring_queue" not in st.session_state:
+    st.session_state.scoring_queue = None
 
 
 # Animation CSS for step indicators
@@ -292,8 +298,94 @@ STEP_ANIMATION_CSS = """
     font-size: 14px;
     margin-left: 10px;
 }
+
+.queue-item {
+    padding: 10px 15px;
+    border-radius: 8px;
+    margin: 5px 0;
+    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.queue-item.processing {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+.queue-item.completed {
+    background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+    color: white;
+}
+
+.queue-item.failed {
+    background: linear-gradient(135deg, #eb3349 0%, #f45c43 100%);
+    color: white;
+}
+
+.queue-item-time {
+    font-size: 12px;
+    opacity: 0.9;
+    font-weight: bold;
+}
 </style>
 """
+
+
+def render_queue_progress(queue: ProcessingQueue, container=None):
+    """Render the processing queue progress in the UI.
+    
+    Args:
+        queue: The ProcessingQueue to render
+        container: Optional Streamlit container to render into
+    """
+    if container is None:
+        container = st
+    
+    progress = queue.get_progress()
+    
+    # Progress bar
+    container.progress(progress["percentage"] / 100)
+    
+    # Summary metrics
+    col1, col2, col3, col4 = container.columns(4)
+    with col1:
+        container.metric("Total", progress["total"])
+    with col2:
+        container.metric("Completed", progress["completed"], delta_color="normal")
+    with col3:
+        container.metric("Processing", progress["processing"])
+    with col4:
+        elapsed = format_duration(queue.get_total_duration())
+        container.metric("Elapsed", elapsed)
+    
+    # Queue items table
+    container.markdown("#### Queue Status")
+    
+    for item in queue.items:
+        status_icon = item.get_status_icon()
+        status_class = item.status.value
+        elapsed_time = format_duration(item.get_elapsed_time()) if item.start_time else "-"
+        
+        # Create a styled row for each item
+        if item.status == QueueItemStatus.PROCESSING:
+            container.markdown(
+                f"🔄 **{item.name}** - *Processing...* `{elapsed_time}`",
+            )
+        elif item.status == QueueItemStatus.COMPLETED:
+            container.markdown(
+                f"✅ **{item.name}** - Completed in `{elapsed_time}`",
+            )
+        elif item.status == QueueItemStatus.FAILED:
+            container.error(
+                f"❌ **{item.name}** - Failed: {item.error_message}",
+            )
+        else:
+            container.markdown(
+                f"⏳ **{item.name}** - Pending",
+            )
 
 
 def get_scoring_guide() -> str:
@@ -497,6 +589,9 @@ def render_sidebar():
             st.session_state.extraction_service = ExtractionService.DOCUMENT_INTELLIGENCE
             st.session_state.evaluation_mode = "individual"
             st.session_state.reasoning_effort = "low"
+            st.session_state.extraction_queue = None
+            st.session_state.scoring_queue = None
+            st.session_state.step_durations = {}
             st.rerun()
         
         st.markdown("---")
@@ -623,6 +718,11 @@ def render_step2():
     if st.session_state.rfp_content and st.session_state.proposal_contents:
         st.success("✅ All documents have been processed!")
         
+        # Show extraction queue summary if available
+        if st.session_state.extraction_queue:
+            with st.expander("📊 Extraction Queue Summary", expanded=False):
+                _render_extraction_queue_summary(st.session_state.extraction_queue)
+        
         # Show extracted content previews
         with st.expander("📄 RFP Content Preview", expanded=False):
             st.markdown(st.session_state.rfp_content[:2000] + "..." if len(st.session_state.rfp_content) > 2000 else st.session_state.rfp_content)
@@ -649,7 +749,7 @@ def render_step2():
 
 
 def run_extraction_pipeline():
-    """Run the document extraction pipeline for all uploaded files."""
+    """Run the document extraction pipeline for all uploaded files with queue-based progress tracking."""
     extraction_service = st.session_state.extraction_service
     logger.info("====== EXTRACTION PIPELINE STARTED (Service: %s) ======", extraction_service.value)
     pipeline_start = time.time()
@@ -657,58 +757,169 @@ def run_extraction_pipeline():
     # Inject animation CSS
     st.markdown(STEP_ANIMATION_CSS, unsafe_allow_html=True)
     
-    progress_container = st.container()
+    # Create extraction queue
+    extraction_queue = ProcessingQueue(name="Document Extraction")
     
-    with progress_container:
-        progress_bar = st.progress(0)
-        status_text = st.empty()
+    # Add RFP to queue
+    rfp_file = st.session_state.rfp_file
+    extraction_queue.add_item(
+        id="rfp",
+        name=f"📄 RFP: {rfp_file['name']}",
+        item_type="rfp",
+        metadata={"filename": rfp_file["name"], "size": len(rfp_file["bytes"])}
+    )
+    
+    # Add proposals to queue
+    for i, proposal_file in enumerate(st.session_state.proposal_files):
+        extraction_queue.add_item(
+            id=f"proposal_{i}",
+            name=f"📝 Proposal: {proposal_file['name']}",
+            item_type="proposal",
+            metadata={"filename": proposal_file["name"], "size": len(proposal_file["bytes"])}
+        )
+    
+    extraction_queue.start()
+    st.session_state.extraction_queue = extraction_queue
+    
+    # Create progress display containers
+    st.subheader("📄 Document Extraction Queue")
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    queue_container = st.container()
+    
+    try:
+        all_files = [rfp_file] + st.session_state.proposal_files
+        total_files = len(all_files)
+        results = []
         
-        try:
-            # Collect all files to process
-            all_files = [st.session_state.rfp_file] + st.session_state.proposal_files
-            total_files = len(all_files)
+        # Process each document sequentially to show real-time progress
+        for i, file_data in enumerate(all_files):
+            item_id = "rfp" if i == 0 else f"proposal_{i-1}"
+            item = extraction_queue.get_item(item_id)
             
-            status_text.text(f"📄 Processing {total_files} documents...")
+            # Update status
+            item.start()
+            progress = extraction_queue.get_progress()
+            progress_bar.progress(progress["percentage"] / 100)
+            status_text.text(f"🔄 Processing {i+1}/{total_files}: {file_data['name']}...")
             
-            async def process_all_documents():
-                tasks = []
-                for file_data in all_files:
-                    task = process_document(
+            # Render queue status
+            with queue_container:
+                _render_extraction_queue_status(extraction_queue)
+            
+            # Process the document
+            try:
+                content, duration = asyncio.run(
+                    process_document(
                         file_data["bytes"],
                         file_data["name"],
                         extraction_service
                     )
-                    tasks.append(task)
-                return await asyncio.gather(*tasks)
+                )
+                item.complete(result=content)
+                results.append((content, duration))
+                logger.info("Extracted %s in %.2fs", file_data["name"], duration)
+                
+            except Exception as e:
+                item.fail(str(e))
+                logger.error("Failed to extract %s: %s", file_data["name"], str(e))
+                raise
             
-            results = asyncio.run(process_all_documents())
+            # Update display
+            progress = extraction_queue.get_progress()
+            progress_bar.progress(progress["percentage"] / 100)
             
-            # Store results
-            rfp_content, rfp_duration = results[0]
-            st.session_state.rfp_content = rfp_content
-            st.session_state.step_durations["rfp_processing"] = rfp_duration
-            
-            proposal_contents = {}
-            for i, file_data in enumerate(st.session_state.proposal_files):
-                content, duration = results[i + 1]
-                proposal_contents[file_data["name"]] = content
-                st.session_state.step_durations[f"proposal_{i}_processing"] = duration
-            
-            st.session_state.proposal_contents = proposal_contents
-            
-            progress_bar.progress(100)
-            total_duration = time.time() - pipeline_start
-            st.session_state.step_durations["extraction_total"] = total_duration
-            
-            logger.info("====== EXTRACTION PIPELINE COMPLETED in %.2fs ======", total_duration)
-            status_text.success(f"✅ All documents processed in {format_duration(total_duration)}")
-            
-            st.rerun()
-            
-        except Exception as e:
-            logger.error("Extraction pipeline failed: %s", str(e))
-            status_text.empty()
-            st.error(f"Error during extraction: {str(e)}")
+            # Re-render queue status
+            queue_container.empty()
+            with queue_container:
+                _render_extraction_queue_status(extraction_queue)
+        
+        # Store results
+        rfp_content, rfp_duration = results[0]
+        st.session_state.rfp_content = rfp_content
+        st.session_state.step_durations["rfp_processing"] = rfp_duration
+        
+        proposal_contents = {}
+        for i, file_data in enumerate(st.session_state.proposal_files):
+            content, duration = results[i + 1]
+            proposal_contents[file_data["name"]] = content
+            st.session_state.step_durations[f"proposal_{i}_processing"] = duration
+        
+        st.session_state.proposal_contents = proposal_contents
+        
+        extraction_queue.finish()
+        st.session_state.extraction_queue = extraction_queue
+        
+        total_duration = time.time() - pipeline_start
+        st.session_state.step_durations["extraction_total"] = total_duration
+        
+        logger.info("====== EXTRACTION PIPELINE COMPLETED in %.2fs ======", total_duration)
+        
+        progress_bar.progress(100)
+        status_text.success(f"✅ All {total_files} documents processed in {format_duration(total_duration)}")
+        
+        # Show final summary
+        st.markdown("---")
+        st.markdown("### ✅ Extraction Complete")
+        _render_extraction_queue_summary(extraction_queue)
+        
+        time.sleep(1)  # Brief pause to show completion
+        st.rerun()
+        
+    except Exception as e:
+        logger.error("Extraction pipeline failed: %s", str(e))
+        extraction_queue.finish()
+        st.session_state.extraction_queue = extraction_queue
+        status_text.empty()
+        st.error(f"Error during extraction: {str(e)}")
+
+
+def _render_extraction_queue_status(queue: ProcessingQueue):
+    """Render the extraction queue status table."""
+    for item in queue.items:
+        col1, col2, col3 = st.columns([3, 1, 1])
+        
+        with col1:
+            if item.status == QueueItemStatus.PROCESSING:
+                st.markdown(f"🔄 **{item.name}**")
+            elif item.status == QueueItemStatus.COMPLETED:
+                st.markdown(f"✅ **{item.name}**")
+            elif item.status == QueueItemStatus.FAILED:
+                st.markdown(f"❌ **{item.name}**")
+            else:
+                st.markdown(f"⏳ {item.name}")
+        
+        with col2:
+            st.caption(item.status.value.upper())
+        
+        with col3:
+            if item.start_time:
+                st.caption(f"`{format_duration(item.get_elapsed_time())}`")
+            else:
+                st.caption("-")
+
+
+def _render_extraction_queue_summary(queue: ProcessingQueue):
+    """Render the extraction queue summary after completion."""
+    col1, col2, col3, col4 = st.columns(4)
+    
+    progress = queue.get_progress()
+    
+    with col1:
+        st.metric("Total Documents", progress["total"])
+    with col2:
+        st.metric("Completed", progress["completed"])
+    with col3:
+        st.metric("Total Time", format_duration(queue.get_total_duration()))
+    with col4:
+        avg_time = queue.get_average_item_duration()
+        st.metric("Avg per Doc", format_duration(avg_time))
+    
+    # Show individual document times
+    with st.expander("📊 Document Processing Times", expanded=False):
+        for item in queue.items:
+            if item.duration:
+                st.markdown(f"• **{item.name}**: `{format_duration(item.duration)}`")
 
 
 def render_step3():
@@ -761,7 +972,7 @@ def render_step3():
 
 
 def run_evaluation_pipeline():
-    """Run the full multi-vendor evaluation pipeline with progress indicators."""
+    """Run the full multi-vendor evaluation pipeline with queue-based progress tracking."""
     reasoning_effort = st.session_state.reasoning_effort
     evaluation_mode = st.session_state.evaluation_mode
     global_criteria = st.session_state.global_criteria
@@ -773,31 +984,71 @@ def run_evaluation_pipeline():
     # Inject animation CSS
     st.markdown(STEP_ANIMATION_CSS, unsafe_allow_html=True)
     
-    progress_container = st.container()
+    # Create scoring queue
+    scoring_queue = ProcessingQueue(name="Proposal Scoring")
     
-    with progress_container:
-        progress_bar = st.progress(0)
-        status_text = st.empty()
+    proposal_files = st.session_state.proposal_files
+    
+    if evaluation_mode == "individual":
+        # Add each proposal as a separate queue item
+        for i, proposal_file in enumerate(proposal_files):
+            scoring_queue.add_item(
+                id=f"proposal_{i}",
+                name=f"📝 {proposal_file['name']}",
+                item_type="evaluation",
+                metadata={"filename": proposal_file["name"]}
+            )
+    else:
+        # Combined mode - single item for all
+        scoring_queue.add_item(
+            id="combined",
+            name=f"📝 Combined Evaluation ({len(proposal_files)} proposals)",
+            item_type="combined_evaluation",
+            metadata={"proposal_count": len(proposal_files)}
+        )
+    
+    # Add comparison step if multiple proposals
+    if len(proposal_files) > 1:
+        scoring_queue.add_item(
+            id="comparison",
+            name="📊 Vendor Comparison",
+            item_type="comparison",
+            metadata={}
+        )
+    
+    scoring_queue.start()
+    st.session_state.scoring_queue = scoring_queue
+    
+    # Create progress display containers
+    st.subheader("🎯 Proposal Scoring Queue")
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    queue_container = st.container()
+    
+    try:
+        evaluation_results = []
+        total_items = len(scoring_queue.items)
         
-        try:
-            proposal_files = st.session_state.proposal_files
-            total_proposals = len(proposal_files)
-            
-            # Step 1: Evaluate each proposal
-            evaluation_results = []
-            
-            if evaluation_mode == "individual":
-                # Score each proposal individually
-                for i, proposal_file in enumerate(proposal_files):
-                    proposal_name = proposal_file["name"]
-                    proposal_content = st.session_state.proposal_contents.get(proposal_name, "")
-                    
-                    progress_pct = int(10 + (70 * i / total_proposals))
-                    progress_bar.progress(progress_pct)
-                    status_text.text(f"📊 Evaluating proposal {i+1}/{total_proposals}: {proposal_name}...")
-                    
-                    logger.info("Evaluating proposal %d/%d: %s", i+1, total_proposals, proposal_name)
-                    
+        if evaluation_mode == "individual":
+            # Score each proposal individually
+            for i, proposal_file in enumerate(proposal_files):
+                proposal_name = proposal_file["name"]
+                proposal_content = st.session_state.proposal_contents.get(proposal_name, "")
+                
+                item = scoring_queue.get_item(f"proposal_{i}")
+                item.start()
+                
+                progress = scoring_queue.get_progress()
+                progress_bar.progress(progress["percentage"] / 100)
+                status_text.text(f"🔄 Scoring proposal {i+1}/{len(proposal_files)}: {proposal_name}...")
+                
+                # Render queue status
+                with queue_container:
+                    _render_scoring_queue_status(scoring_queue)
+                
+                logger.info("Evaluating proposal %d/%d: %s", i+1, len(proposal_files), proposal_name)
+                
+                try:
                     results, duration = asyncio.run(
                         evaluate_proposal(
                             st.session_state.rfp_content,
@@ -807,34 +1058,53 @@ def run_evaluation_pipeline():
                         )
                     )
                     
-                    # Add proposal filename to results
                     results["_proposal_file"] = proposal_name
                     evaluation_results.append(results)
+                    item.complete(result=results)
                     
                     st.session_state.step_durations[f"eval_{proposal_name}"] = duration
                     logger.info("Proposal %s evaluated in %.2fs", proposal_name, duration)
-            else:
-                # Combined evaluation - score all together
-                # Combine all proposal contents
-                combined_content = ""
-                for proposal_file in proposal_files:
-                    proposal_name = proposal_file["name"]
-                    proposal_content = st.session_state.proposal_contents.get(proposal_name, "")
-                    combined_content += f"\n\n## Vendor Proposal: {proposal_name}\n\n{proposal_content}"
+                    
+                except Exception as e:
+                    item.fail(str(e))
+                    logger.error("Failed to evaluate %s: %s", proposal_name, str(e))
+                    raise
                 
-                status_text.text("📊 Evaluating all proposals together...")
-                progress_bar.progress(40)
+                # Update display
+                progress = scoring_queue.get_progress()
+                progress_bar.progress(progress["percentage"] / 100)
                 
-                # Check content length and potentially chunk (basic token estimation)
-                estimated_tokens = len(combined_content) // 4  # rough estimate
-                max_tokens = 100000  # conservative limit
-                
-                if estimated_tokens > max_tokens:
-                    logger.warning("Combined content exceeds token limit, chunking required")
-                    # For now, we'll just use the combined content as-is
-                    # In production, you'd implement proper chunking
-                    st.warning(f"⚠️ Combined content is large ({estimated_tokens:,} estimated tokens). Results may be truncated.")
-                
+                queue_container.empty()
+                with queue_container:
+                    _render_scoring_queue_status(scoring_queue)
+                    
+        else:
+            # Combined evaluation - score all together
+            item = scoring_queue.get_item("combined")
+            item.start()
+            
+            status_text.text("📊 Evaluating all proposals together...")
+            progress_bar.progress(20)
+            
+            with queue_container:
+                _render_scoring_queue_status(scoring_queue)
+            
+            # Combine all proposal contents
+            combined_content = ""
+            for proposal_file in proposal_files:
+                proposal_name = proposal_file["name"]
+                proposal_content = st.session_state.proposal_contents.get(proposal_name, "")
+                combined_content += f"\n\n## Vendor Proposal: {proposal_name}\n\n{proposal_content}"
+            
+            # Check content length
+            estimated_tokens = len(combined_content) // 4
+            max_tokens = 100000
+            
+            if estimated_tokens > max_tokens:
+                logger.warning("Combined content exceeds token limit, chunking required")
+                st.warning(f"⚠️ Combined content is large ({estimated_tokens:,} estimated tokens). Results may be truncated.")
+            
+            try:
                 results, duration = asyncio.run(
                     evaluate_proposal(
                         st.session_state.rfp_content,
@@ -846,15 +1116,34 @@ def run_evaluation_pipeline():
                 
                 results["_proposal_file"] = "Combined Evaluation"
                 evaluation_results.append(results)
+                item.complete(result=results)
                 st.session_state.step_durations["eval_combined"] = duration
-            
-            st.session_state.evaluation_results = evaluation_results
-            progress_bar.progress(80)
-            
-            # Step 2: Compare results (if multiple proposals)
-            if len(evaluation_results) > 1:
-                status_text.text("📈 Comparing vendor results...")
                 
+            except Exception as e:
+                item.fail(str(e))
+                raise
+            
+            progress = scoring_queue.get_progress()
+            progress_bar.progress(progress["percentage"] / 100)
+            
+            queue_container.empty()
+            with queue_container:
+                _render_scoring_queue_status(scoring_queue)
+        
+        st.session_state.evaluation_results = evaluation_results
+        
+        # Step 2: Compare results (if multiple proposals)
+        if len(evaluation_results) > 1:
+            comparison_item = scoring_queue.get_item("comparison")
+            comparison_item.start()
+            
+            status_text.text("📈 Comparing vendor results...")
+            
+            queue_container.empty()
+            with queue_container:
+                _render_scoring_queue_status(scoring_queue)
+            
+            try:
                 comparison_agent = ComparisonAgent()
                 rfp_title = evaluation_results[0].get("rfp_title", "RFP Evaluation")
                 
@@ -867,39 +1156,113 @@ def run_evaluation_pipeline():
                 )
                 
                 st.session_state.comparison_results = comparison_results
+                comparison_item.complete(result=comparison_results)
                 logger.info("Comparison completed")
+                
+            except Exception as e:
+                comparison_item.fail(str(e))
+                raise
+        else:
+            # Single proposal - no comparison needed
+            st.session_state.comparison_results = {
+                "rfp_title": evaluation_results[0].get("rfp_title", "RFP Evaluation"),
+                "total_vendors": 1,
+                "vendor_rankings": [{
+                    "rank": 1,
+                    "vendor_name": evaluation_results[0].get("supplier_name", "Unknown"),
+                    "total_score": evaluation_results[0].get("total_score", 0),
+                    "grade": evaluation_results[0].get("grade", "N/A"),
+                    "key_strengths": evaluation_results[0].get("overall_strengths", [])[:3],
+                    "key_concerns": evaluation_results[0].get("overall_weaknesses", [])[:3],
+                    "recommendation": evaluation_results[0].get("recommendation", "")
+                }],
+                "selection_recommendation": evaluation_results[0].get("recommendation", ""),
+                "comparison_insights": []
+            }
+        
+        scoring_queue.finish()
+        st.session_state.scoring_queue = scoring_queue
+        
+        progress_bar.progress(100)
+        
+        total_duration = time.time() - pipeline_start
+        st.session_state.step_durations["evaluation_total"] = total_duration
+        
+        logger.info("====== EVALUATION PIPELINE COMPLETED in %.2fs ======", total_duration)
+        
+        status_text.success(f"✅ Evaluation complete! Total time: {format_duration(total_duration)}")
+        
+        # Show final summary
+        st.markdown("---")
+        st.markdown("### ✅ Scoring Complete")
+        _render_scoring_queue_summary(scoring_queue)
+        
+        time.sleep(1)  # Brief pause to show completion
+        st.rerun()
+        
+    except Exception as e:
+        logger.error("Evaluation pipeline failed: %s", str(e))
+        scoring_queue.finish()
+        st.session_state.scoring_queue = scoring_queue
+        status_text.empty()
+        st.error(f"Error during evaluation: {str(e)}")
+
+
+def _render_scoring_queue_status(queue: ProcessingQueue):
+    """Render the scoring queue status table."""
+    for item in queue.items:
+        col1, col2, col3 = st.columns([3, 1, 1])
+        
+        with col1:
+            if item.status == QueueItemStatus.PROCESSING:
+                st.markdown(f"🔄 **{item.name}**")
+            elif item.status == QueueItemStatus.COMPLETED:
+                # Show score if available
+                if item.result and isinstance(item.result, dict) and "total_score" in item.result:
+                    score = item.result["total_score"]
+                    grade = item.result.get("grade", "")
+                    st.markdown(f"✅ **{item.name}** - Score: {score:.1f} ({grade})")
+                else:
+                    st.markdown(f"✅ **{item.name}**")
+            elif item.status == QueueItemStatus.FAILED:
+                st.markdown(f"❌ **{item.name}**")
             else:
-                # Single proposal - no comparison needed
-                st.session_state.comparison_results = {
-                    "rfp_title": evaluation_results[0].get("rfp_title", "RFP Evaluation"),
-                    "total_vendors": 1,
-                    "vendor_rankings": [{
-                        "rank": 1,
-                        "vendor_name": evaluation_results[0].get("supplier_name", "Unknown"),
-                        "total_score": evaluation_results[0].get("total_score", 0),
-                        "grade": evaluation_results[0].get("grade", "N/A"),
-                        "key_strengths": evaluation_results[0].get("overall_strengths", [])[:3],
-                        "key_concerns": evaluation_results[0].get("overall_weaknesses", [])[:3],
-                        "recommendation": evaluation_results[0].get("recommendation", "")
-                    }],
-                    "selection_recommendation": evaluation_results[0].get("recommendation", ""),
-                    "comparison_insights": []
-                }
-            
-            progress_bar.progress(100)
-            
-            total_duration = time.time() - pipeline_start
-            st.session_state.step_durations["evaluation_total"] = total_duration
-            
-            logger.info("====== EVALUATION PIPELINE COMPLETED in %.2fs ======", total_duration)
-            status_text.success(f"✅ Evaluation complete! Total time: {format_duration(total_duration)}")
-            
-            st.rerun()
-            
-        except Exception as e:
-            logger.error("Evaluation pipeline failed: %s", str(e))
-            status_text.empty()
-            st.error(f"Error during evaluation: {str(e)}")
+                st.markdown(f"⏳ {item.name}")
+        
+        with col2:
+            st.caption(item.status.value.upper())
+        
+        with col3:
+            if item.start_time:
+                st.caption(f"`{format_duration(item.get_elapsed_time())}`")
+            else:
+                st.caption("-")
+
+
+def _render_scoring_queue_summary(queue: ProcessingQueue):
+    """Render the scoring queue summary after completion."""
+    col1, col2, col3, col4 = st.columns(4)
+    
+    progress = queue.get_progress()
+    
+    with col1:
+        st.metric("Total Items", progress["total"])
+    with col2:
+        st.metric("Completed", progress["completed"])
+    with col3:
+        st.metric("Total Time", format_duration(queue.get_total_duration()))
+    with col4:
+        avg_time = queue.get_average_item_duration()
+        st.metric("Avg per Item", format_duration(avg_time))
+    
+    # Show individual item times
+    with st.expander("📊 Scoring Times", expanded=False):
+        for item in queue.items:
+            if item.duration:
+                extra_info = ""
+                if item.result and isinstance(item.result, dict) and "total_score" in item.result:
+                    extra_info = f" (Score: {item.result['total_score']:.1f})"
+                st.markdown(f"• **{item.name}**: `{format_duration(item.duration)}`{extra_info}")
 
 
 def render_comparison_results():
