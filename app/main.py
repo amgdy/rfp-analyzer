@@ -42,7 +42,7 @@ os.environ["AZURE_TRACING_GEN_AI_CONTENT_RECORDING_ENABLED"] = "true" # False by
 from services.document_processor import DocumentProcessor, ExtractionService
 from services.scoring_agent_v2 import ScoringAgentV2
 from services.comparison_agent import ComparisonAgent, generate_word_report, generate_full_analysis_report
-from services.processing_queue import ProcessingQueue, QueueItem, QueueItemStatus, format_duration as queue_format_duration
+from services.processing_queue import ProcessingQueue, QueueItem, QueueItemStatus
 
 # Optional PDF support
 try:
@@ -298,94 +298,8 @@ STEP_ANIMATION_CSS = """
     font-size: 14px;
     margin-left: 10px;
 }
-
-.queue-item {
-    padding: 10px 15px;
-    border-radius: 8px;
-    margin: 5px 0;
-    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-}
-
-.queue-item.processing {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-    animation: pulse 1.5s ease-in-out infinite;
-}
-
-.queue-item.completed {
-    background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
-    color: white;
-}
-
-.queue-item.failed {
-    background: linear-gradient(135deg, #eb3349 0%, #f45c43 100%);
-    color: white;
-}
-
-.queue-item-time {
-    font-size: 12px;
-    opacity: 0.9;
-    font-weight: bold;
-}
 </style>
 """
-
-
-def render_queue_progress(queue: ProcessingQueue, container=None):
-    """Render the processing queue progress in the UI.
-    
-    Args:
-        queue: The ProcessingQueue to render
-        container: Optional Streamlit container to render into
-    """
-    if container is None:
-        container = st
-    
-    progress = queue.get_progress()
-    
-    # Progress bar
-    container.progress(progress["percentage"] / 100)
-    
-    # Summary metrics
-    col1, col2, col3, col4 = container.columns(4)
-    with col1:
-        container.metric("Total", progress["total"])
-    with col2:
-        container.metric("Completed", progress["completed"], delta_color="normal")
-    with col3:
-        container.metric("Processing", progress["processing"])
-    with col4:
-        elapsed = format_duration(queue.get_total_duration())
-        container.metric("Elapsed", elapsed)
-    
-    # Queue items table
-    container.markdown("#### Queue Status")
-    
-    for item in queue.items:
-        status_icon = item.get_status_icon()
-        status_class = item.status.value
-        elapsed_time = format_duration(item.get_elapsed_time()) if item.start_time else "-"
-        
-        # Create a styled row for each item
-        if item.status == QueueItemStatus.PROCESSING:
-            container.markdown(
-                f"🔄 **{item.name}** - *Processing...* `{elapsed_time}`",
-            )
-        elif item.status == QueueItemStatus.COMPLETED:
-            container.markdown(
-                f"✅ **{item.name}** - Completed in `{elapsed_time}`",
-            )
-        elif item.status == QueueItemStatus.FAILED:
-            container.error(
-                f"❌ **{item.name}** - Failed: {item.error_message}",
-            )
-        else:
-            container.markdown(
-                f"⏳ **{item.name}** - Pending",
-            )
 
 
 def get_scoring_guide() -> str:
