@@ -41,7 +41,7 @@ os.environ["AZURE_TRACING_GEN_AI_CONTENT_RECORDING_ENABLED"] = "true" # False by
 # enable_instrumentation()    
 from services.document_processor import DocumentProcessor, ExtractionService
 from services.scoring_agent_v2 import ScoringAgentV2
-from services.comparison_agent import ComparisonAgent, generate_word_report
+from services.comparison_agent import ComparisonAgent, generate_word_report, generate_full_analysis_report
 
 # Optional PDF support
 try:
@@ -55,6 +55,14 @@ try:
     MARKDOWN_AVAILABLE = True
 except ImportError:
     MARKDOWN_AVAILABLE = False
+
+# Optional chart support
+try:
+    import plotly.express as px
+    import plotly.graph_objects as go
+    PLOTLY_AVAILABLE = True
+except ImportError:
+    PLOTLY_AVAILABLE = False
 
 # Configure logging
 logging.basicConfig(
@@ -219,13 +227,13 @@ if "comparison_results" not in st.session_state:
 if "step_durations" not in st.session_state:
     st.session_state.step_durations = {}
 if "extraction_service" not in st.session_state:
-    st.session_state.extraction_service = ExtractionService.CONTENT_UNDERSTANDING
+    st.session_state.extraction_service = ExtractionService.DOCUMENT_INTELLIGENCE
 if "evaluation_mode" not in st.session_state:
     st.session_state.evaluation_mode = "individual"  # "individual" or "combined"
 if "global_criteria" not in st.session_state:
     st.session_state.global_criteria = ""
 if "reasoning_effort" not in st.session_state:
-    st.session_state.reasoning_effort = "high"
+    st.session_state.reasoning_effort = "low"
 
 
 # Animation CSS for step indicators
@@ -299,7 +307,7 @@ def get_scoring_guide() -> str:
 async def process_document(
     file_bytes: bytes, 
     filename: str, 
-    extraction_service: ExtractionService = ExtractionService.CONTENT_UNDERSTANDING
+    extraction_service: ExtractionService = ExtractionService.DOCUMENT_INTELLIGENCE
 ) -> tuple[str, float]:
     """Process uploaded document using the configured extraction service.
     
@@ -395,14 +403,14 @@ def render_sidebar():
         st.subheader("🔧 Document Extraction")
         
         service_options = {
-            ExtractionService.CONTENT_UNDERSTANDING: "Azure Content Understanding",
-            ExtractionService.DOCUMENT_INTELLIGENCE: "Azure Document Intelligence"
+            ExtractionService.DOCUMENT_INTELLIGENCE: "Azure Document Intelligence",
+            ExtractionService.CONTENT_UNDERSTANDING: "Azure Content Understanding"
         }
         
         service = st.radio(
             "Extraction service:",
             options=list(service_options.keys()),
-            index=0 if st.session_state.extraction_service == ExtractionService.CONTENT_UNDERSTANDING else 1,
+            index=0 if st.session_state.extraction_service == ExtractionService.DOCUMENT_INTELLIGENCE else 1,
             format_func=lambda x: service_options[x],
             help="Choose the Azure service for document text extraction."
         )
@@ -486,9 +494,9 @@ def render_sidebar():
             st.session_state.evaluation_results = []
             st.session_state.comparison_results = None
             st.session_state.global_criteria = ""
-            st.session_state.extraction_service = ExtractionService.CONTENT_UNDERSTANDING
+            st.session_state.extraction_service = ExtractionService.DOCUMENT_INTELLIGENCE
             st.session_state.evaluation_mode = "individual"
-            st.session_state.reasoning_effort = "high"
+            st.session_state.reasoning_effort = "low"
             st.rerun()
         
         st.markdown("---")
@@ -930,24 +938,289 @@ def render_comparison_results():
     st.markdown("---")
     
     # Tabs for different views
-    tab1, tab2, tab3, tab4 = st.tabs([
-        "📊 Comparison Overview", 
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "📊 Dashboard",
+        "🔍 Comparison Overview", 
         "📋 Individual Reports", 
         "📈 Detailed Scores",
         "📥 Export"
     ])
     
     with tab1:
-        render_comparison_overview(comparison, evaluations)
+        render_metrics_dashboard(comparison, evaluations)
     
     with tab2:
-        render_individual_reports(evaluations)
+        render_comparison_overview(comparison, evaluations)
     
     with tab3:
-        render_detailed_scores(evaluations)
+        render_individual_reports(evaluations)
     
     with tab4:
+        render_detailed_scores(evaluations)
+    
+    with tab5:
         render_export_options(comparison, evaluations)
+
+
+def render_metrics_dashboard(comparison: dict, evaluations: list):
+    """Render the metrics dashboard with pie charts for each criterion/competency."""
+    st.subheader("📊 Metrics Dashboard")
+    st.markdown("Visual comparison of vendor performance across all evaluation criteria.")
+    
+    if not evaluations:
+        st.warning("No evaluations available to display.")
+        return
+    
+    if not PLOTLY_AVAILABLE:
+        st.warning("📊 Plotly is not installed. Install it with `pip install plotly` for interactive charts.")
+        # Fallback to basic metrics display
+        _render_basic_metrics_dashboard(comparison, evaluations)
+        return
+    
+    # Get all criteria from first evaluation
+    criteria = []
+    if evaluations[0].get("criterion_scores"):
+        criteria = evaluations[0]["criterion_scores"]
+    
+    if not criteria:
+        st.warning("No criteria scores available.")
+        return
+    
+    # Overall vendor comparison bar chart (total scores)
+    st.markdown("### 🏆 Overall Vendor Performance")
+    _render_overall_comparison_bar(evaluations)
+    
+    st.markdown("---")
+    st.markdown("### 📈 Performance by Criterion")
+    st.markdown("Each chart shows how vendor scores compare for a specific evaluation criterion. "
+                "Taller bars indicate higher scores.")
+    
+    # Create bar charts for each criterion
+    num_criteria = len(criteria)
+    cols_per_row = 2
+    
+    for i in range(0, num_criteria, cols_per_row):
+        cols = st.columns(cols_per_row)
+        
+        for j in range(cols_per_row):
+            criterion_idx = i + j
+            if criterion_idx >= num_criteria:
+                break
+                
+            criterion = criteria[criterion_idx]
+            criterion_name = criterion.get("criterion_name", f"Criterion {criterion_idx + 1}")
+            criterion_weight = criterion.get("weight", 0)
+            
+            with cols[j]:
+                _render_criterion_bar_chart(evaluations, criterion_idx, criterion_name, criterion_weight)
+    
+    # Vendor recommendation section
+    st.markdown("---")
+    st.markdown("### 💡 Vendor Recommendations by Criterion")
+    _render_criterion_recommendations(comparison, evaluations)
+
+
+def _render_overall_comparison_bar(evaluations: list):
+    """Render bar chart showing overall vendor comparison."""
+    vendor_names = []
+    total_scores = []
+    grades = []
+    
+    for eval_result in evaluations:
+        vendor_name = eval_result.get("supplier_name", "Unknown")
+        total_score = eval_result.get("total_score", 0)
+        grade = eval_result.get("grade", "N/A")
+        vendor_names.append(vendor_name)
+        total_scores.append(total_score)
+        grades.append(grade)
+    
+    # Sort by score descending
+    sorted_data = sorted(zip(vendor_names, total_scores, grades), key=lambda x: x[1], reverse=True)
+    vendor_names, total_scores, grades = zip(*sorted_data) if sorted_data else ([], [], [])
+    
+    # Create bar chart
+    fig = px.bar(
+        x=list(vendor_names),
+        y=list(total_scores),
+        title="Total Score Comparison",
+        labels={"x": "Vendor", "y": "Total Score"},
+        color=list(total_scores),
+        color_continuous_scale="RdYlGn",
+        text=[f"{s:.1f} ({g})" for s, g in zip(total_scores, grades)]
+    )
+    
+    fig.update_traces(
+        textposition='outside',
+        hovertemplate="<b>%{x}</b><br>Score: %{y:.1f}<extra></extra>"
+    )
+    
+    fig.update_layout(
+        showlegend=False,
+        xaxis_title="Vendor",
+        yaxis_title="Total Score",
+        yaxis_range=[0, 105],
+        margin=dict(t=50, b=50, l=50, r=20),
+        height=400,
+        coloraxis_showscale=False
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def _render_criterion_bar_chart(evaluations: list, criterion_idx: int, criterion_name: str, weight: float):
+    """Render a bar chart for a specific criterion showing vendor scores."""
+    vendor_names = []
+    scores = []
+    
+    for eval_result in evaluations:
+        vendor_name = eval_result.get("supplier_name", "Unknown")
+        criterion_scores = eval_result.get("criterion_scores", [])
+        
+        if criterion_idx < len(criterion_scores):
+            score = criterion_scores[criterion_idx].get("raw_score", 0)
+        else:
+            score = 0
+            
+        vendor_names.append(vendor_name)
+        scores.append(score)
+    
+    # Sort by score descending
+    sorted_data = sorted(zip(vendor_names, scores), key=lambda x: x[1], reverse=True)
+    vendor_names, scores = zip(*sorted_data) if sorted_data else ([], [])
+    
+    # Find best vendor for this criterion
+    best_vendor = vendor_names[0] if vendor_names else "N/A"
+    best_score = scores[0] if scores else 0
+    
+    # Create bar chart
+    fig = px.bar(
+        x=list(vendor_names),
+        y=list(scores),
+        title=f"{criterion_name}<br><sup>Weight: {weight:.1f}% | Best: {best_vendor} ({best_score:.1f})</sup>",
+        labels={"x": "Vendor", "y": "Score"},
+        color=list(scores),
+        color_continuous_scale="RdYlGn",
+        text=[f"{s:.1f}" for s in scores]
+    )
+    
+    fig.update_traces(
+        textposition='outside',
+        hovertemplate="<b>%{x}</b><br>Score: %{y:.1f}/100<extra></extra>"
+    )
+    
+    fig.update_layout(
+        showlegend=False,
+        xaxis_title="",
+        yaxis_title="Score",
+        yaxis_range=[0, 105],
+        margin=dict(t=60, b=30, l=40, r=10),
+        height=300,
+        coloraxis_showscale=False,
+        xaxis_tickangle=-45 if len(vendor_names) > 3 else 0
+    )
+    
+    st.plotly_chart(fig, use_container_width=True, key=f"bar_{criterion_idx}")
+
+
+def _render_criterion_recommendations(comparison: dict, evaluations: list):
+    """Render recommendations for each criterion based on vendor performance."""
+    criterion_comparisons = comparison.get("criterion_comparisons", [])
+    
+    if not criterion_comparisons:
+        # Fall back to generating recommendations from evaluations
+        if not evaluations or not evaluations[0].get("criterion_scores"):
+            return
+            
+        criteria = evaluations[0]["criterion_scores"]
+        for criterion_idx, criterion in enumerate(criteria):
+            criterion_name = criterion.get("criterion_name", f"Criterion {criterion_idx + 1}")
+            
+            # Find best vendor for this criterion
+            best_vendor = None
+            best_score = -1
+            all_scores = []
+            
+            for eval_result in evaluations:
+                vendor_name = eval_result.get("supplier_name", "Unknown")
+                criterion_scores = eval_result.get("criterion_scores", [])
+                
+                if criterion_idx < len(criterion_scores):
+                    score = criterion_scores[criterion_idx].get("raw_score", 0)
+                    all_scores.append((vendor_name, score))
+                    if score > best_score:
+                        best_score = score
+                        best_vendor = vendor_name
+            
+            if best_vendor:
+                with st.expander(f"**{criterion_name}** - Recommended: {best_vendor}"):
+                    st.markdown(f"**Best Performer:** {best_vendor} (Score: {best_score:.1f}/100)")
+                    
+                    # Show all vendor scores
+                    st.markdown("**All Vendors:**")
+                    for vendor, score in sorted(all_scores, key=lambda x: x[1], reverse=True):
+                        icon = "🥇" if vendor == best_vendor else "📊"
+                        st.markdown(f"  {icon} {vendor}: {score:.1f}/100")
+    else:
+        # Use the comparison agent's criterion comparisons
+        for cc in criterion_comparisons:
+            criterion_name = cc.get("criterion_name", "Unknown")
+            best_vendor = cc.get("best_vendor", "N/A")
+            worst_vendor = cc.get("worst_vendor", "N/A")
+            score_range = cc.get("score_range", "N/A")
+            insights = cc.get("insights", "")
+            weight = cc.get("weight", 0)
+            
+            with st.expander(f"**{criterion_name}** (Weight: {weight:.1f}%) - Recommended: {best_vendor}"):
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("🥇 Best", best_vendor)
+                with col2:
+                    st.metric("📉 Lowest", worst_vendor)
+                with col3:
+                    st.metric("📊 Score Range", score_range)
+                
+                if insights:
+                    st.markdown(f"**Why choose {best_vendor}:** {insights}")
+
+
+def _render_basic_metrics_dashboard(comparison: dict, evaluations: list):
+    """Render a basic metrics dashboard without plotly charts."""
+    st.markdown("### Vendor Performance Summary")
+    
+    # Overall comparison table
+    st.markdown("#### Total Scores")
+    for eval_result in sorted(evaluations, key=lambda x: x.get("total_score", 0), reverse=True):
+        vendor_name = eval_result.get("supplier_name", "Unknown")
+        total_score = eval_result.get("total_score", 0)
+        grade = eval_result.get("grade", "N/A")
+        
+        # Progress bar visualization
+        st.markdown(f"**{vendor_name}**: {total_score:.1f}/100 ({grade})")
+        st.progress(min(total_score / 100, 1.0))
+    
+    st.markdown("---")
+    st.markdown("#### Criterion Scores")
+    
+    if evaluations and evaluations[0].get("criterion_scores"):
+        criteria = evaluations[0]["criterion_scores"]
+        
+        for criterion_idx, criterion in enumerate(criteria):
+            criterion_name = criterion.get("criterion_name", f"Criterion {criterion_idx + 1}")
+            criterion_weight = criterion.get("weight", 0)
+            
+            st.markdown(f"**{criterion_name}** (Weight: {criterion_weight:.1f}%)")
+            
+            for eval_result in evaluations:
+                vendor_name = eval_result.get("supplier_name", "Unknown")
+                criterion_scores = eval_result.get("criterion_scores", [])
+                
+                if criterion_idx < len(criterion_scores):
+                    score = criterion_scores[criterion_idx].get("raw_score", 0)
+                    col1, col2 = st.columns([3, 1])
+                    with col1:
+                        st.progress(min(score / 100, 1.0))
+                    with col2:
+                        st.write(f"{vendor_name[:15]}: {score:.1f}")
 
 
 def render_comparison_overview(comparison: dict, evaluations: list):
@@ -1008,22 +1281,48 @@ def render_individual_reports(evaluations: list):
             with col3:
                 st.metric("File", proposal_file[:25] + "..." if len(proposal_file) > 25 else proposal_file)
             
-            # Criterion scores
-            st.markdown("#### Criterion Scores")
+            # Criterion scores with justifications
+            st.markdown("#### Criterion Scores & Justifications")
             criterion_scores = eval_result.get("criterion_scores", [])
             for cs in criterion_scores:
                 score_pct = cs.get("raw_score", 0)
                 bar_color = "🟢" if score_pct >= 80 else "🟡" if score_pct >= 60 else "🟠" if score_pct >= 40 else "🔴"
-                st.markdown(f"{bar_color} **{cs.get('criterion_name', 'Unknown')}**: {score_pct:.1f}/100 (weighted: {cs.get('weighted_score', 0):.2f})")
+                criterion_name = cs.get('criterion_name', 'Unknown')
+                weighted_score = cs.get('weighted_score', 0)
+                justification = cs.get('justification', '')
+                
+                # Show criterion score with expandable justification
+                with st.container():
+                    st.markdown(f"{bar_color} **{criterion_name}**: {score_pct:.1f}/100 (weighted: {weighted_score:.2f})")
+                    if justification:
+                        with st.expander("📝 View Justification", expanded=False):
+                            st.markdown(justification)
+                    
+                    # Show strengths and gaps for this criterion if available
+                    strengths = cs.get('strengths', [])
+                    gaps = cs.get('gaps', [])
+                    if strengths or gaps:
+                        col_s, col_g = st.columns(2)
+                        with col_s:
+                            if strengths:
+                                st.markdown("**Strengths:**")
+                                for s in strengths[:3]:
+                                    st.markdown(f"  ✅ {s}")
+                        with col_g:
+                            if gaps:
+                                st.markdown("**Gaps:**")
+                                for g in gaps[:3]:
+                                    st.markdown(f"  ⚠️ {g}")
+                    st.markdown("---")
             
-            # Strengths and weaknesses
+            # Overall Strengths and weaknesses
             col1, col2 = st.columns(2)
             with col1:
-                st.markdown("#### Strengths")
+                st.markdown("#### Overall Strengths")
                 for s in eval_result.get("overall_strengths", []):
                     st.markdown(f"✅ {s}")
             with col2:
-                st.markdown("#### Weaknesses")
+                st.markdown("#### Overall Weaknesses")
                 for w in eval_result.get("overall_weaknesses", []):
                     st.markdown(f"⚠️ {w}")
             
@@ -1074,10 +1373,30 @@ def render_export_options(comparison: dict, evaluations: list):
     """Render export options for reports."""
     st.subheader("📥 Export Reports")
     
+    # Full Analysis Report (with comparison)
+    st.markdown("### 📑 Full Analysis Report")
+    st.markdown("Complete report including comparison, rankings, and all vendor details.")
+    
+    if comparison and evaluations:
+        full_report = generate_full_analysis_report(comparison, evaluations)
+        if full_report:
+            st.download_button(
+                label="📑 Download Full Analysis Report (Word)",
+                data=full_report,
+                file_name="rfp_full_analysis_report.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                use_container_width=True,
+                key="full_analysis_report"
+            )
+        else:
+            st.caption("Word export not available. Install python-docx with: pip install python-docx")
+    
+    st.markdown("---")
+    
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        st.markdown("### CSV Comparison")
+        st.markdown("### 📊 CSV Comparison")
         if comparison and evaluations:
             comparison_agent = ComparisonAgent()
             csv_content = comparison_agent.generate_csv_report(comparison, evaluations)
@@ -1090,7 +1409,7 @@ def render_export_options(comparison: dict, evaluations: list):
             )
     
     with col2:
-        st.markdown("### JSON Data")
+        st.markdown("### 📋 JSON Data")
         full_data = {
             "comparison": comparison,
             "evaluations": evaluations
@@ -1104,13 +1423,22 @@ def render_export_options(comparison: dict, evaluations: list):
         )
     
     with col3:
-        st.markdown("### Word Reports")
-        for i, eval_result in enumerate(evaluations):
+        st.markdown("### 📄 Individual Reports")
+        st.caption("Detailed Word report for each vendor")
+    
+    # Individual vendor reports in a separate section
+    st.markdown("### 📄 Individual Vendor Reports (Word)")
+    st.markdown("Detailed reports with criterion justifications for each vendor.")
+    
+    vendor_cols = st.columns(min(len(evaluations), 4))
+    for i, eval_result in enumerate(evaluations):
+        col_idx = i % min(len(evaluations), 4)
+        with vendor_cols[col_idx]:
             vendor_name = eval_result.get("supplier_name", f"Vendor_{i+1}").replace(" ", "_")
             word_doc = generate_word_report(eval_result)
             if word_doc:
                 st.download_button(
-                    label=f"📄 {vendor_name[:15]}",
+                    label=f"📄 {vendor_name[:20]}",
                     data=word_doc,
                     file_name=f"report_{vendor_name}.docx",
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -1118,7 +1446,7 @@ def render_export_options(comparison: dict, evaluations: list):
                     key=f"word_{i}"
                 )
             else:
-                st.caption(f"Word export not available for {vendor_name[:15]}")
+                st.caption(f"Not available for {vendor_name[:15]}")
 
 
 def render_results(results: dict):
