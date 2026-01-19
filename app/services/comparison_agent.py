@@ -479,8 +479,8 @@ def generate_word_report(evaluation: Dict[str, Any], rfp_content: str = "") -> b
     
     doc.add_paragraph()
     
-    # Criterion Scores
-    doc.add_heading('Criterion Scores', level=1)
+    # Criterion Scores Overview
+    doc.add_heading('Criterion Scores Overview', level=1)
     
     criterion_scores = evaluation.get("criterion_scores", [])
     if criterion_scores:
@@ -503,13 +503,47 @@ def generate_word_report(evaluation: Dict[str, Any], rfp_content: str = "") -> b
     
     doc.add_paragraph()
     
-    # Strengths
-    doc.add_heading('Key Strengths', level=1)
+    # Detailed Criterion Analysis with Justifications
+    doc.add_heading('Detailed Criterion Analysis', level=1)
+    
+    for cs in criterion_scores:
+        criterion_name = cs.get("criterion_name", "Unknown")
+        score = cs.get("raw_score", 0)
+        weight = cs.get("weight", 0)
+        justification = cs.get("justification", "")
+        strengths = cs.get("strengths", [])
+        gaps = cs.get("gaps", [])
+        
+        # Criterion header
+        doc.add_heading(f'{criterion_name} (Score: {score:.1f}/100)', level=2)
+        doc.add_paragraph(f"Weight: {weight:.1f}%")
+        
+        # Justification
+        if justification:
+            doc.add_heading('Score Justification', level=3)
+            doc.add_paragraph(justification)
+        
+        # Strengths
+        if strengths:
+            doc.add_heading('Strengths', level=3)
+            for s in strengths:
+                doc.add_paragraph(f"• {s}", style='List Bullet')
+        
+        # Gaps
+        if gaps:
+            doc.add_heading('Gaps/Areas for Improvement', level=3)
+            for g in gaps:
+                doc.add_paragraph(f"• {g}", style='List Bullet')
+        
+        doc.add_paragraph()
+    
+    # Overall Strengths
+    doc.add_heading('Overall Key Strengths', level=1)
     for strength in evaluation.get("overall_strengths", []):
         doc.add_paragraph(f"• {strength}", style='List Bullet')
     
-    # Weaknesses
-    doc.add_heading('Key Weaknesses', level=1)
+    # Overall Weaknesses
+    doc.add_heading('Overall Key Weaknesses', level=1)
     for weakness in evaluation.get("overall_weaknesses", []):
         doc.add_paragraph(f"• {weakness}", style='List Bullet')
     
@@ -525,6 +559,276 @@ def generate_word_report(evaluation: Dict[str, Any], rfp_content: str = "") -> b
     # Risk Assessment
     doc.add_heading('Risk Assessment', level=1)
     doc.add_paragraph(evaluation.get("risk_assessment", ""))
+    
+    # Save to bytes
+    buffer = io.BytesIO()
+    doc.save(buffer)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
+def generate_full_analysis_report(comparison: Dict[str, Any], evaluations: List[Dict[str, Any]]) -> bytes:
+    """
+    Generate a comprehensive Word document with the full analysis report including comparison.
+    
+    Args:
+        comparison: Comparison result dictionary
+        evaluations: List of evaluation result dictionaries
+        
+    Returns:
+        Word document as bytes
+    """
+    if not DOCX_AVAILABLE:
+        logger.warning("python-docx not installed. Word export not available.")
+        return None
+    
+    doc = Document()
+    
+    # Title
+    title = doc.add_heading('RFP Vendor Analysis Report', 0)
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    
+    # Report metadata
+    doc.add_paragraph(f"Report Date: {comparison.get('comparison_date', datetime.now().strftime('%Y-%m-%d'))}")
+    doc.add_paragraph(f"RFP Title: {comparison.get('rfp_title', 'N/A')}")
+    doc.add_paragraph(f"Vendors Evaluated: {comparison.get('total_vendors', len(evaluations))}")
+    doc.add_paragraph()
+    
+    # ==========================================
+    # SECTION 1: EXECUTIVE SUMMARY
+    # ==========================================
+    doc.add_heading('Executive Summary', level=1)
+    
+    # Selection Recommendation
+    recommendation = comparison.get("selection_recommendation", "")
+    if recommendation:
+        doc.add_heading('Selection Recommendation', level=2)
+        doc.add_paragraph(recommendation)
+    
+    # Winner Summary
+    winner_summary = comparison.get("winner_summary", "")
+    if winner_summary:
+        doc.add_heading('Winner Summary', level=2)
+        doc.add_paragraph(winner_summary)
+    
+    # Key Insights
+    insights = comparison.get("comparison_insights", [])
+    if insights:
+        doc.add_heading('Key Insights', level=2)
+        for insight in insights:
+            doc.add_paragraph(f"• {insight}", style='List Bullet')
+    
+    doc.add_page_break()
+    
+    # ==========================================
+    # SECTION 2: VENDOR RANKINGS
+    # ==========================================
+    doc.add_heading('Vendor Rankings', level=1)
+    
+    rankings = comparison.get("vendor_rankings", [])
+    if rankings:
+        # Rankings table
+        rankings_table = doc.add_table(rows=len(rankings) + 1, cols=4)
+        rankings_table.style = 'Table Grid'
+        
+        headers = ["Rank", "Vendor", "Score", "Grade"]
+        header_row = rankings_table.rows[0]
+        for i, h in enumerate(headers):
+            header_row.cells[i].text = h
+        
+        for i, ranking in enumerate(rankings, 1):
+            row = rankings_table.rows[i]
+            row.cells[0].text = str(ranking.get("rank", i))
+            row.cells[1].text = ranking.get("vendor_name", "")
+            row.cells[2].text = f"{ranking.get('total_score', 0):.1f}"
+            row.cells[3].text = ranking.get("grade", "")
+        
+        doc.add_paragraph()
+        
+        # Detailed ranking information
+        for ranking in rankings:
+            vendor_name = ranking.get("vendor_name", "Unknown")
+            rank = ranking.get("rank", 0)
+            
+            doc.add_heading(f'#{rank} - {vendor_name}', level=2)
+            
+            # Key Strengths
+            strengths = ranking.get("key_strengths", [])
+            if strengths:
+                doc.add_heading('Key Strengths', level=3)
+                for s in strengths:
+                    doc.add_paragraph(f"• {s}", style='List Bullet')
+            
+            # Key Concerns
+            concerns = ranking.get("key_concerns", [])
+            if concerns:
+                doc.add_heading('Key Concerns', level=3)
+                for c in concerns:
+                    doc.add_paragraph(f"• {c}", style='List Bullet')
+            
+            # Recommendation
+            rec = ranking.get("recommendation", "")
+            if rec:
+                doc.add_paragraph(f"Recommendation: {rec}")
+            
+            doc.add_paragraph()
+    
+    doc.add_page_break()
+    
+    # ==========================================
+    # SECTION 3: CRITERION COMPARISON
+    # ==========================================
+    doc.add_heading('Performance by Criterion', level=1)
+    
+    criterion_comparisons = comparison.get("criterion_comparisons", [])
+    if criterion_comparisons:
+        for cc in criterion_comparisons:
+            criterion_name = cc.get("criterion_name", "Unknown")
+            weight = cc.get("weight", 0)
+            
+            doc.add_heading(f'{criterion_name} (Weight: {weight:.1f}%)', level=2)
+            
+            # Summary table
+            cc_table = doc.add_table(rows=3, cols=2)
+            cc_table.style = 'Table Grid'
+            cc_table.rows[0].cells[0].text = "Best Performer"
+            cc_table.rows[0].cells[1].text = cc.get("best_vendor", "N/A")
+            cc_table.rows[1].cells[0].text = "Lowest Performer"
+            cc_table.rows[1].cells[1].text = cc.get("worst_vendor", "N/A")
+            cc_table.rows[2].cells[0].text = "Score Range"
+            cc_table.rows[2].cells[1].text = cc.get("score_range", "N/A")
+            
+            insights = cc.get("insights", "")
+            if insights:
+                doc.add_paragraph()
+                doc.add_paragraph(f"Insights: {insights}")
+            
+            doc.add_paragraph()
+    
+    # Score comparison table
+    doc.add_heading('Score Comparison Matrix', level=2)
+    
+    if evaluations:
+        # Get all criteria
+        all_criteria = []
+        if evaluations[0].get("criterion_scores"):
+            all_criteria = evaluations[0]["criterion_scores"]
+        
+        if all_criteria:
+            # Create comparison table
+            num_vendors = len(evaluations)
+            matrix_table = doc.add_table(rows=len(all_criteria) + 2, cols=num_vendors + 2)
+            matrix_table.style = 'Table Grid'
+            
+            # Header row
+            matrix_table.rows[0].cells[0].text = "Criterion"
+            matrix_table.rows[0].cells[1].text = "Weight"
+            for i, eval_result in enumerate(evaluations):
+                matrix_table.rows[0].cells[i + 2].text = eval_result.get("supplier_name", f"Vendor {i+1}")[:15]
+            
+            # Data rows
+            for row_idx, criterion in enumerate(all_criteria, 1):
+                matrix_table.rows[row_idx].cells[0].text = criterion.get("criterion_name", "")
+                matrix_table.rows[row_idx].cells[1].text = f"{criterion.get('weight', 0):.1f}%"
+                
+                for col_idx, eval_result in enumerate(evaluations):
+                    scores = eval_result.get("criterion_scores", [])
+                    if row_idx - 1 < len(scores):
+                        score = scores[row_idx - 1].get("raw_score", 0)
+                        matrix_table.rows[row_idx].cells[col_idx + 2].text = f"{score:.1f}"
+            
+            # Total row
+            last_row = len(all_criteria) + 1
+            matrix_table.rows[last_row].cells[0].text = "TOTAL SCORE"
+            matrix_table.rows[last_row].cells[1].text = "100%"
+            for col_idx, eval_result in enumerate(evaluations):
+                matrix_table.rows[last_row].cells[col_idx + 2].text = f"{eval_result.get('total_score', 0):.1f}"
+    
+    doc.add_page_break()
+    
+    # ==========================================
+    # SECTION 4: RISK ASSESSMENT
+    # ==========================================
+    doc.add_heading('Risk Assessment', level=1)
+    
+    risk_comparison = comparison.get("risk_comparison", "")
+    if risk_comparison:
+        doc.add_paragraph(risk_comparison)
+    else:
+        doc.add_paragraph("No specific risk assessment provided.")
+    
+    doc.add_page_break()
+    
+    # ==========================================
+    # SECTION 5: DETAILED VENDOR REPORTS
+    # ==========================================
+    doc.add_heading('Detailed Vendor Reports', level=1)
+    
+    for eval_result in evaluations:
+        vendor_name = eval_result.get("supplier_name", "Unknown")
+        total_score = eval_result.get("total_score", 0)
+        grade = eval_result.get("grade", "N/A")
+        
+        doc.add_heading(f'{vendor_name}', level=2)
+        
+        # Summary
+        doc.add_paragraph(f"Total Score: {total_score:.1f} | Grade: {grade}")
+        
+        # Executive Summary
+        exec_summary = eval_result.get("executive_summary", "")
+        if exec_summary:
+            doc.add_heading('Executive Summary', level=3)
+            doc.add_paragraph(exec_summary)
+        
+        # Criterion Scores with Justifications
+        doc.add_heading('Criterion Analysis', level=3)
+        
+        criterion_scores = eval_result.get("criterion_scores", [])
+        for cs in criterion_scores:
+            criterion_name = cs.get("criterion_name", "Unknown")
+            score = cs.get("raw_score", 0)
+            weight = cs.get("weight", 0)
+            justification = cs.get("justification", "")
+            strengths = cs.get("strengths", [])
+            gaps = cs.get("gaps", [])
+            
+            doc.add_heading(f'{criterion_name}: {score:.1f}/100 (Weight: {weight:.1f}%)', level=4)
+            
+            if justification:
+                doc.add_paragraph(f"Justification: {justification}")
+            
+            if strengths:
+                doc.add_paragraph("Strengths:")
+                for s in strengths:
+                    doc.add_paragraph(f"  • {s}")
+            
+            if gaps:
+                doc.add_paragraph("Gaps:")
+                for g in gaps:
+                    doc.add_paragraph(f"  • {g}")
+        
+        # Overall Strengths
+        overall_strengths = eval_result.get("overall_strengths", [])
+        if overall_strengths:
+            doc.add_heading('Overall Strengths', level=3)
+            for s in overall_strengths:
+                doc.add_paragraph(f"• {s}", style='List Bullet')
+        
+        # Overall Weaknesses
+        overall_weaknesses = eval_result.get("overall_weaknesses", [])
+        if overall_weaknesses:
+            doc.add_heading('Overall Weaknesses', level=3)
+            for w in overall_weaknesses:
+                doc.add_paragraph(f"• {w}", style='List Bullet')
+        
+        # Recommendations
+        recommendations = eval_result.get("recommendations", [])
+        if recommendations:
+            doc.add_heading('Recommendations', level=3)
+            for rec in recommendations:
+                doc.add_paragraph(f"• {rec}", style='List Bullet')
+        
+        doc.add_page_break()
     
     # Save to bytes
     buffer = io.BytesIO()
