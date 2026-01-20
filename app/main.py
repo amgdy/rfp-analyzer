@@ -1,10 +1,10 @@
 """
 RFP Analyzer - Streamlit Application
 
-A 3-step workflow for analyzing RFPs and scoring vendor proposals:
-1. Upload the RFP file
-2. Upload the Vendor proposal
-3. Evaluate and score
+A comprehensive workflow for analyzing RFPs and scoring vendor proposals:
+1. Upload RFP file and Vendor proposals (multiple files)
+2. Configure extraction service and evaluation criteria
+3. AI-powered evaluation and multi-vendor comparison
 """
 
 import os
@@ -14,7 +14,9 @@ import asyncio
 import time
 import logging
 import io
+import json
 from datetime import datetime
+from typing import List, Dict, Any, Optional
 
 # Initialize Azure Monitor / Application Insights telemetry
 # Must be done before other imports to instrument all libraries
@@ -37,9 +39,10 @@ os.environ["AZURE_TRACING_GEN_AI_CONTENT_RECORDING_ENABLED"] = "true" # False by
 
 # # # optional if you do not have ENABLE_INSTRUMENTATION in env vars
 # enable_instrumentation()    
-from services.document_processor import DocumentProcessor
-from services.scoring_agent import ScoringAgent
+from services.document_processor import DocumentProcessor, ExtractionService
 from services.scoring_agent_v2 import ScoringAgentV2
+from services.comparison_agent import ComparisonAgent, generate_word_report, generate_full_analysis_report
+from services.processing_queue import ProcessingQueue, QueueItem, QueueItemStatus
 
 # Optional PDF support
 try:
@@ -53,6 +56,14 @@ try:
     MARKDOWN_AVAILABLE = True
 except ImportError:
     MARKDOWN_AVAILABLE = False
+
+# Optional chart support
+try:
+    import plotly.express as px
+    import plotly.graph_objects as go
+    PLOTLY_AVAILABLE = True
+except ImportError:
+    PLOTLY_AVAILABLE = False
 
 # Configure logging
 logging.basicConfig(
@@ -204,20 +215,31 @@ if "step" not in st.session_state:
     st.session_state.step = 1
 if "rfp_file" not in st.session_state:
     st.session_state.rfp_file = None
-if "proposal_file" not in st.session_state:
-    st.session_state.proposal_file = None
+if "proposal_files" not in st.session_state:
+    st.session_state.proposal_files = []  # Changed to list for multiple proposals
 if "rfp_content" not in st.session_state:
     st.session_state.rfp_content = None
-if "proposal_content" not in st.session_state:
-    st.session_state.proposal_content = None
-if "scoring_results" not in st.session_state:
-    st.session_state.scoring_results = None
+if "proposal_contents" not in st.session_state:
+    st.session_state.proposal_contents = {}  # Dict mapping filename to content
+if "evaluation_results" not in st.session_state:
+    st.session_state.evaluation_results = []  # List of evaluation results
+if "comparison_results" not in st.session_state:
+    st.session_state.comparison_results = None
 if "step_durations" not in st.session_state:
     st.session_state.step_durations = {}
-if "scoring_version" not in st.session_state:
-    st.session_state.scoring_version = "v1"
+if "extraction_service" not in st.session_state:
+    st.session_state.extraction_service = ExtractionService.DOCUMENT_INTELLIGENCE
+if "evaluation_mode" not in st.session_state:
+    st.session_state.evaluation_mode = "individual"  # "individual" or "combined"
+if "global_criteria" not in st.session_state:
+    st.session_state.global_criteria = ""
 if "reasoning_effort" not in st.session_state:
-    st.session_state.reasoning_effort = "high"
+    st.session_state.reasoning_effort = "low"
+# Queue states for tracking progress
+if "extraction_queue" not in st.session_state:
+    st.session_state.extraction_queue = None
+if "scoring_queue" not in st.session_state:
+    st.session_state.scoring_queue = None
 
 
 # Animation CSS for step indicators
@@ -288,8 +310,17 @@ def get_scoring_guide() -> str:
     return ""
 
 
-async def process_document(file_bytes: bytes, filename: str) -> tuple[str, float]:
-    """Process uploaded document using Azure Content Understanding.
+async def process_document(
+    file_bytes: bytes, 
+    filename: str, 
+    extraction_service: ExtractionService = ExtractionService.DOCUMENT_INTELLIGENCE
+) -> tuple[str, float]:
+    """Process uploaded document using the configured extraction service.
+    
+    Args:
+        file_bytes: Document content as bytes
+        filename: Original filename
+        extraction_service: Which service to use for extraction
     
     Returns:
         Tuple of (content, duration_seconds)
@@ -297,11 +328,12 @@ async def process_document(file_bytes: bytes, filename: str) -> tuple[str, float
     with tracer.start_as_current_span("process_document") as span:
         span.set_attribute("document.filename", filename)
         span.set_attribute("document.size_bytes", len(file_bytes))
+        span.set_attribute("document.extraction_service", extraction_service.value)
         
         start_time = time.time()
-        logger.info("Starting document processing: %s", filename)
+        logger.info("Starting document processing: %s using %s", filename, extraction_service.value)
         
-        processor = DocumentProcessor()
+        processor = DocumentProcessor(service=extraction_service)
         content = await processor.extract_content(file_bytes, filename)
         
         duration = time.time() - start_time
@@ -315,8 +347,7 @@ async def process_document(file_bytes: bytes, filename: str) -> tuple[str, float
 async def evaluate_proposal(
     rfp_content: str, 
     proposal_content: str, 
-    scoring_guide: str, 
-    version: str = "v1", 
+    global_criteria: str = "",
     reasoning_effort: str = "high",
     progress_callback: callable = None
 ) -> tuple[dict, float]:
@@ -325,42 +356,42 @@ async def evaluate_proposal(
     Args:
         rfp_content: The RFP content
         proposal_content: The proposal content
-        scoring_guide: The scoring guide (used in v1 only)
-        version: Scoring version ("v1" or "v2")
+        global_criteria: Optional user-provided global evaluation criteria
         reasoning_effort: Reasoning effort level ("low", "medium", "high")
-        progress_callback: Optional callback for progress updates (V2 only)
+        progress_callback: Optional callback for progress updates
     
     Returns:
         Tuple of (results, duration_seconds)
     """
     with tracer.start_as_current_span("evaluate_proposal") as span:
-        span.set_attribute("evaluation.version", version)
         span.set_attribute("evaluation.reasoning_effort", reasoning_effort)
         span.set_attribute("evaluation.rfp_content_length", len(rfp_content))
         span.set_attribute("evaluation.proposal_content_length", len(proposal_content))
         
         start_time = time.time()
-        logger.info("Starting proposal evaluation (version: %s, effort: %s)...", version, reasoning_effort)
+        logger.info("Starting proposal evaluation (effort: %s)...", reasoning_effort)
         
-        if version == "v2":
-            agent = ScoringAgentV2()
-            results = await agent.evaluate(
-                rfp_content, 
-                proposal_content, 
-                reasoning_effort=reasoning_effort,
-                progress_callback=progress_callback
-            )
+        # Always use V2 (multi-agent) for evaluation
+        agent = ScoringAgentV2()
+        
+        # Combine RFP content with global criteria if provided
+        if global_criteria:
+            enhanced_rfp = f"{rfp_content}\n\n## Additional Evaluation Criteria (User Specified)\n\n{global_criteria}"
         else:
-            agent = ScoringAgent()
-            results = await agent.evaluate(rfp_content, proposal_content, scoring_guide, reasoning_effort=reasoning_effort)
+            enhanced_rfp = rfp_content
+        
+        results = await agent.evaluate(
+            enhanced_rfp, 
+            proposal_content, 
+            reasoning_effort=reasoning_effort,
+            progress_callback=progress_callback
+        )
         
         duration = time.time() - start_time
         
         # Add result attributes to span
         if isinstance(results, dict) and "total_score" in results:
             span.set_attribute("evaluation.total_score", results["total_score"])
-        elif hasattr(results, "evaluation") and hasattr(results.evaluation, "total_score"):
-            span.set_attribute("evaluation.total_score", results.evaluation.total_score)
         span.set_attribute("evaluation.duration_seconds", duration)
         
         logger.info("Evaluation completed in %.2fs", duration)
@@ -369,36 +400,60 @@ async def evaluate_proposal(
 
 
 def render_sidebar():
-    """Render the sidebar with step navigation."""
+    """Render the sidebar with configuration and navigation."""
     with st.sidebar:
         st.title("📄 RFP Analyzer")
         st.markdown("---")
         
-        # Scoring Mode Section (at the top)
-        st.subheader("⚙️ Scoring Mode")
+        # Extraction Service Selection
+        st.subheader("🔧 Document Extraction")
         
-        # Scoring Version Selection
-        version = st.radio(
-            "Select scoring version:",
-            options=["v1", "v2"],
-            index=0 if st.session_state.scoring_version == "v1" else 1,
-            format_func=lambda x: "V1 - Single Agent" if x == "v1" else "V2 - Multi Agents",
-            help="V1: Uses predefined scoring guide. V2: Extracts criteria from RFP automatically."
+        service_options = {
+            ExtractionService.DOCUMENT_INTELLIGENCE: "Azure Document Intelligence",
+            ExtractionService.CONTENT_UNDERSTANDING: "Azure Content Understanding"
+        }
+        
+        service = st.radio(
+            "Extraction service:",
+            options=list(service_options.keys()),
+            index=0 if st.session_state.extraction_service == ExtractionService.DOCUMENT_INTELLIGENCE else 1,
+            format_func=lambda x: service_options[x],
+            help="Choose the Azure service for document text extraction."
         )
-        if version != st.session_state.scoring_version:
-            st.session_state.scoring_version = version
-            st.session_state.scoring_results = None  # Reset results when version changes
+        if service != st.session_state.extraction_service:
+            st.session_state.extraction_service = service
+            # Reset content when service changes
+            st.session_state.rfp_content = None
+            st.session_state.proposal_contents = {}
             st.rerun()
         
-        # Show version description
-        if st.session_state.scoring_version == "v1":
-            st.caption("📋 Uses predefined scoring criteria from the scoring guide.")
-        else:
-            st.caption("🤖 Multi Agents: Extracts criteria from RFP, then scores the proposal.")
+        st.markdown("")
+        
+        # Evaluation Mode Selection
+        st.subheader("📊 Evaluation Mode")
+        
+        mode_options = {
+            "individual": "Score Each Individually",
+            "combined": "Score All Together"
+        }
+        
+        mode = st.radio(
+            "Evaluation approach:",
+            options=["individual", "combined"],
+            index=0 if st.session_state.evaluation_mode == "individual" else 1,
+            format_func=lambda x: mode_options[x],
+            help="Individual: Each proposal scored separately. Combined: All proposals evaluated together (may require chunking for large documents)."
+        )
+        if mode != st.session_state.evaluation_mode:
+            st.session_state.evaluation_mode = mode
+            st.session_state.evaluation_results = []
+            st.session_state.comparison_results = None
+            st.rerun()
         
         st.markdown("")
         
         # Analysis Depth Selection
+        st.subheader("🧠 Analysis Depth")
         depth_options = {
             "low": "Standard (~5 mins)",
             "medium": "Thorough (~10 mins)",
@@ -413,7 +468,8 @@ def render_sidebar():
         )
         if effort != st.session_state.reasoning_effort:
             st.session_state.reasoning_effort = effort
-            st.session_state.scoring_results = None  # Reset results when effort changes
+            st.session_state.evaluation_results = []
+            st.session_state.comparison_results = None
             st.rerun()
         
         st.markdown("---")
@@ -421,9 +477,9 @@ def render_sidebar():
         # Step indicators
         st.subheader("📍 Progress")
         steps = [
-            ("1️⃣", "Upload RFP", st.session_state.step >= 1),
-            ("2️⃣", "Upload Proposal", st.session_state.step >= 2),
-            ("3️⃣", "Evaluate & Score", st.session_state.step >= 3),
+            ("1️⃣", "Upload Documents", st.session_state.step >= 1),
+            ("2️⃣", "Configure & Extract", st.session_state.step >= 2),
+            ("3️⃣", "Evaluate & Compare", st.session_state.step >= 3),
         ]
         
         for icon, label, active in steps:
@@ -438,78 +494,177 @@ def render_sidebar():
         if st.button("🔄 Start Over", use_container_width=True):
             st.session_state.step = 1
             st.session_state.rfp_file = None
-            st.session_state.proposal_file = None
+            st.session_state.proposal_files = []
             st.session_state.rfp_content = None
-            st.session_state.proposal_content = None
-            st.session_state.scoring_results = None
-            st.session_state.scoring_version = "v1"
-            st.session_state.reasoning_effort = "high"
+            st.session_state.proposal_contents = {}
+            st.session_state.evaluation_results = []
+            st.session_state.comparison_results = None
+            st.session_state.global_criteria = ""
+            st.session_state.extraction_service = ExtractionService.DOCUMENT_INTELLIGENCE
+            st.session_state.evaluation_mode = "individual"
+            st.session_state.reasoning_effort = "low"
+            st.session_state.extraction_queue = None
+            st.session_state.scoring_queue = None
+            st.session_state.step_durations = {}
             st.rerun()
         
         st.markdown("---")
-        st.caption("Powered by Azure Content Understanding & Microsoft Agent Framework")
+        st.caption("Powered by Azure AI Services & Microsoft Agent Framework")
 
 
 def render_step1():
-    """Step 1: Upload RFP file."""
-    st.header("Step 1: Upload RFP Document")
-    st.markdown("Upload the Request for Proposal (RFP) document to begin the analysis.")
+    """Step 1: Upload RFP and Vendor Proposals."""
+    st.header("Step 1: Upload Documents")
+    st.markdown("Upload the RFP document and vendor proposal files to begin the analysis.")
     
-    uploaded_file = st.file_uploader(
-        "Choose RFP file",
-        type=["pdf", "docx", "doc", "txt", "md"],
-        key="rfp_uploader",
-        help="Supported formats: PDF, Word documents, Text files, Markdown"
-    )
+    col1, col2 = st.columns(2)
     
-    if uploaded_file is not None:
-        st.info(f"📎 File: **{uploaded_file.name}** ({uploaded_file.size / 1024:.1f} KB)")
+    with col1:
+        st.subheader("📄 RFP Document")
+        st.markdown("Upload a single RFP file")
         
-        if st.button("Continue to Step 2 →", type="primary", use_container_width=True):
-            # Store file data for later processing
+        rfp_file = st.file_uploader(
+            "Choose RFP file",
+            type=["pdf", "docx", "doc", "txt", "md"],
+            key="rfp_uploader",
+            help="Supported formats: PDF, Word documents, Text files, Markdown"
+        )
+        
+        if rfp_file is not None:
+            st.info(f"📎 **{rfp_file.name}** ({rfp_file.size / 1024:.1f} KB)")
             st.session_state.rfp_file = {
-                "bytes": uploaded_file.getvalue(),
-                "name": uploaded_file.name
+                "bytes": rfp_file.getvalue(),
+                "name": rfp_file.name
             }
+        
+        if st.session_state.rfp_file:
+            st.success(f"✅ RFP ready: {st.session_state.rfp_file['name']}")
+    
+    with col2:
+        st.subheader("📝 Vendor Proposals")
+        st.markdown("Upload one or more vendor proposal files")
+        
+        proposal_files = st.file_uploader(
+            "Choose Vendor Proposal files",
+            type=["pdf", "docx", "doc", "txt", "md"],
+            key="proposals_uploader",
+            accept_multiple_files=True,
+            help="Supported formats: PDF, Word documents, Text files, Markdown"
+        )
+        
+        if proposal_files:
+            st.info(f"📎 {len(proposal_files)} file(s) selected")
+            for f in proposal_files:
+                st.caption(f"• {f.name} ({f.size / 1024:.1f} KB)")
+            
+            st.session_state.proposal_files = [
+                {"bytes": f.getvalue(), "name": f.name}
+                for f in proposal_files
+            ]
+        
+        if st.session_state.proposal_files:
+            st.success(f"✅ {len(st.session_state.proposal_files)} proposal(s) ready")
+    
+    st.markdown("---")
+    
+    # Global Evaluation Criteria
+    st.subheader("📋 Global Evaluation Criteria (Optional)")
+    st.markdown("Add additional evaluation criteria that will be used alongside criteria extracted from the RFP.")
+    
+    global_criteria = st.text_area(
+        "Enter additional evaluation criteria:",
+        value=st.session_state.global_criteria,
+        height=150,
+        placeholder="Example:\n- Cost effectiveness: 20%\n- Sustainability practices: 15%\n- Local presence: 10%",
+        help="These criteria will be added to the automatically extracted criteria from the RFP."
+    )
+    st.session_state.global_criteria = global_criteria
+    
+    st.markdown("---")
+    
+    # Proceed button
+    can_proceed = st.session_state.rfp_file is not None and len(st.session_state.proposal_files) > 0
+    
+    if can_proceed:
+        if st.button("Continue to Step 2: Extract Content →", type="primary", use_container_width=True):
             st.session_state.step = 2
             st.rerun()
-    
-    # Show stored file if available
-    if st.session_state.rfp_file:
-        st.success(f"✅ RFP uploaded: {st.session_state.rfp_file['name']}")
+    else:
+        st.warning("⚠️ Please upload an RFP file and at least one vendor proposal to continue.")
 
 
 def render_step2():
-    """Step 2: Upload Vendor Proposal."""
-    st.header("Step 2: Upload Vendor Proposal")
-    st.markdown("Upload the vendor's proposal document to compare against the RFP.")
+    """Step 2: Extract Content from Documents."""
+    st.header("Step 2: Extract & Configure")
+    st.markdown("Extract content from uploaded documents and configure evaluation settings.")
     
-    # Show uploaded RFP file
-    if st.session_state.rfp_file:
-        st.success(f"✅ RFP: {st.session_state.rfp_file['name']}")
+    # Show uploaded files summary
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.session_state.rfp_file:
+            st.info(f"📄 RFP: {st.session_state.rfp_file['name']}")
+    with col2:
+        if st.session_state.proposal_files:
+            st.info(f"📝 Proposals: {len(st.session_state.proposal_files)} file(s)")
     
-    uploaded_file = st.file_uploader(
-        "Choose Vendor Proposal file",
-        type=["pdf", "docx", "doc", "txt", "md"],
-        key="proposal_uploader",
-        help="Supported formats: PDF, Word documents, Text files, Markdown"
-    )
+    # Show configuration summary
+    st.markdown("---")
+    st.subheader("⚙️ Current Configuration")
     
-    if uploaded_file is not None:
-        st.info(f"📎 File: **{uploaded_file.name}** ({uploaded_file.size / 1024:.1f} KB)")
+    config_col1, config_col2, config_col3 = st.columns(3)
+    with config_col1:
+        service_name = "Content Understanding" if st.session_state.extraction_service == ExtractionService.CONTENT_UNDERSTANDING else "Document Intelligence"
+        st.metric("Extraction Service", service_name)
+    with config_col2:
+        mode_name = "Individual" if st.session_state.evaluation_mode == "individual" else "Combined"
+        st.metric("Evaluation Mode", mode_name)
+    with config_col3:
+        st.metric("Analysis Depth", st.session_state.reasoning_effort.title())
+    
+    # Global criteria preview
+    if st.session_state.global_criteria:
+        with st.expander("📋 Global Evaluation Criteria", expanded=False):
+            st.markdown(st.session_state.global_criteria)
+    
+    st.markdown("---")
+    
+    # Check if content has been extracted
+    if st.session_state.rfp_content and st.session_state.proposal_contents:
+        st.success("✅ All documents have been processed!")
         
-        if st.button("Continue to Evaluation →", type="primary", use_container_width=True):
-            # Store file data for later processing
-            st.session_state.proposal_file = {
-                "bytes": uploaded_file.getvalue(),
-                "name": uploaded_file.name
-            }
+        # Show extraction queue summary if available
+        if st.session_state.extraction_queue:
+            queue = st.session_state.extraction_queue
+            with st.expander("📊 Extraction Summary", expanded=False):
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Documents", len(queue.items))
+                with col2:
+                    st.metric("Total Time", format_duration(queue.get_total_duration()))
+                with col3:
+                    st.metric("Avg per Doc", format_duration(queue.get_average_item_duration()))
+                
+                for item in queue.items:
+                    if item.duration:
+                        st.markdown(f"• **{item.name}**: `{format_duration(item.duration)}`")
+        
+        # Show extracted content previews
+        with st.expander("📄 RFP Content Preview", expanded=False):
+            st.markdown(st.session_state.rfp_content[:2000] + "..." if len(st.session_state.rfp_content) > 2000 else st.session_state.rfp_content)
+        
+        with st.expander("📝 Proposal Contents Preview", expanded=False):
+            for filename, content in st.session_state.proposal_contents.items():
+                st.markdown(f"### {filename}")
+                st.markdown(content[:1000] + "..." if len(content) > 1000 else content)
+                st.markdown("---")
+        
+        if st.button("Continue to Step 3: Evaluate →", type="primary", use_container_width=True):
             st.session_state.step = 3
             st.rerun()
-    
-    # Show stored file if available
-    if st.session_state.proposal_file:
-        st.success(f"✅ Proposal uploaded: {st.session_state.proposal_file['name']}")
+    else:
+        # Run extraction
+        if st.button("🔍 Extract Document Content", type="primary", use_container_width=True):
+            run_extraction_pipeline()
     
     # Navigation
     st.markdown("---")
@@ -518,270 +673,1006 @@ def render_step2():
         st.rerun()
 
 
-def render_step3():
-    """Step 3: Evaluate and Score."""
-    version_label = "Multi Agents (V2)" if st.session_state.scoring_version == "v2" else "Single Agent (V1)"
-    st.header(f"Step 3: Evaluate & Score ({version_label})")
-    st.markdown("Processing documents and analyzing the vendor proposal against RFP requirements.")
-    
-    # Show uploaded files summary
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.session_state.rfp_file:
-            st.info(f"📄 RFP: {st.session_state.rfp_file['name']}")
-    with col2:
-        if st.session_state.proposal_file:
-            st.info(f"📝 Proposal: {st.session_state.proposal_file['name']}")
-    
-    # Scoring guide (v1) or criteria extraction info (v2)
-    scoring_guide = get_scoring_guide()
-    if st.session_state.scoring_version == "v1":
-        with st.expander("📊 Scoring Guide (V1)", expanded=False):
-            if scoring_guide:
-                st.markdown(scoring_guide)
-            else:
-                st.warning("No scoring guide found. Using default evaluation criteria.")
-    else:
-        with st.expander("🤖 Multi Agents Scoring (V2)", expanded=False):
-            st.info("""
-            **V2 Multi Agents Scoring Process:**
-            
-            1. **Agent 1 - Criteria Extraction**: Analyzes the RFP document to automatically 
-               extract scoring criteria with weights (totaling 100%).
-            
-            2. **Agent 2 - Proposal Scoring**: Evaluates the vendor proposal against the 
-               extracted criteria, providing detailed scores and justifications.
-            
-            This approach ensures that scoring is tailored to each specific RFP's requirements.
-            """)
-    
-    # Process and evaluate
-    if st.session_state.scoring_results is None:
-        if st.button("🎯 Start Evaluation", type="primary", use_container_width=True):
-            run_evaluation_pipeline(scoring_guide)
-    
-    # Display results
-    if st.session_state.scoring_results:
-        if st.session_state.scoring_version == "v2":
-            render_results_v2(st.session_state.scoring_results)
-        else:
-            render_results(st.session_state.scoring_results)
-        
-        # Show processed content
-        st.markdown("---")
-        col1, col2 = st.columns(2)
-        with col1:
-            with st.expander("📄 Processed RFP Content", expanded=False):
-                st.markdown(st.session_state.rfp_content)
-        with col2:
-            with st.expander("📝 Processed Proposal Content", expanded=False):
-                st.markdown(st.session_state.proposal_content)
-    
-    # Navigation
-    st.markdown("---")
-    if st.button("⬅️ Back to Step 2"):
-        st.session_state.step = 2
-        st.session_state.scoring_results = None
-        st.session_state.rfp_content = None
-        st.session_state.proposal_content = None
-        st.rerun()
-
-
-def run_evaluation_pipeline(scoring_guide: str):
-    """Run the full evaluation pipeline with progress indicators, animations, and timing."""
-    scoring_version = st.session_state.scoring_version
-    reasoning_effort = st.session_state.reasoning_effort
-    logger.info("====== EVALUATION PIPELINE STARTED (Version: %s, Effort: %s) ======", 
-               scoring_version.upper(), reasoning_effort)
+def run_extraction_pipeline():
+    """Run the document extraction pipeline with parallel processing and live progress."""
+    extraction_service = st.session_state.extraction_service
+    logger.info("====== EXTRACTION PIPELINE STARTED (Service: %s) ======", extraction_service.value)
     pipeline_start = time.time()
     
     # Inject animation CSS
     st.markdown(STEP_ANIMATION_CSS, unsafe_allow_html=True)
     
-    progress_container = st.container()
+    # Create extraction queue
+    extraction_queue = ProcessingQueue(name="Document Extraction")
     
-    with progress_container:
-        # Progress tracking
-        progress_bar = st.progress(0)
-        status_text = st.empty()
+    # Add RFP to queue
+    rfp_file = st.session_state.rfp_file
+    extraction_queue.add_item(
+        id="rfp",
+        name=rfp_file['name'],
+        item_type="rfp",
+        metadata={"filename": rfp_file["name"], "size": len(rfp_file["bytes"])}
+    )
+    
+    # Add proposals to queue
+    for i, proposal_file in enumerate(st.session_state.proposal_files):
+        extraction_queue.add_item(
+            id=f"proposal_{i}",
+            name=proposal_file['name'],
+            item_type="proposal",
+            metadata={"filename": proposal_file["name"], "size": len(proposal_file["bytes"])}
+        )
+    
+    extraction_queue.start()
+    st.session_state.extraction_queue = extraction_queue
+    
+    # UI Setup - single placeholder for live updates
+    st.subheader("📄 Extracting Documents")
+    
+    # Create a single placeholder that we'll update
+    status_placeholder = st.empty()
+    
+    try:
+        all_files = [rfp_file] + st.session_state.proposal_files
+        total_files = len(all_files)
         
-        # Step indicators with animation containers
-        step1_container = st.empty()
-        step2_container = st.empty()
-        step3_container = st.empty()
+        # Mark all items as processing
+        for item in extraction_queue.items:
+            item.start()
         
-        # Timer display
-        timer_display = st.empty()
+        # Define async function for parallel processing
+        async def process_all_documents():
+            tasks = []
+            for file_data in all_files:
+                task = process_document(
+                    file_data["bytes"],
+                    file_data["name"],
+                    extraction_service
+                )
+                tasks.append(task)
+            return await asyncio.gather(*tasks, return_exceptions=True)
         
-        try:
-            # Step 1: Process RFP and Proposal documents IN PARALLEL
-            docs_start = time.time()
-            logger.info("STEP 1: Processing documents in parallel (RFP + Proposal)...")
-            
-            step1_container.markdown("""
-                <div class="processing-container">
-                    <span class="spinner"></span>
-                    <strong>1. Processing RFP document...</strong>
-                    <span class="duration-badge">⏱️ Running...</span>
-                </div>
-            """, unsafe_allow_html=True)
-            step2_container.markdown("""
-                <div class="processing-container">
-                    <span class="spinner"></span>
-                    <strong>2. Processing Proposal document...</strong>
-                    <span class="duration-badge">⏱️ Running in parallel...</span>
-                </div>
-            """, unsafe_allow_html=True)
-            step3_container.markdown("⬜ 3. AI Reasoning & Scoring...")
-            status_text.text("📄📝 Processing both documents in parallel...")
-            progress_bar.progress(10)
-            
-            # Process both documents concurrently using asyncio.gather
-            async def process_documents_parallel():
-                rfp_task = process_document(
-                    st.session_state.rfp_file["bytes"],
-                    st.session_state.rfp_file["name"]
-                )
-                proposal_task = process_document(
-                    st.session_state.proposal_file["bytes"],
-                    st.session_state.proposal_file["name"]
-                )
-                return await asyncio.gather(rfp_task, proposal_task)
-            
-            (rfp_content, rfp_duration), (proposal_content, proposal_duration) = asyncio.run(
-                process_documents_parallel()
-            )
-            
-            # Calculate parallel processing stats
-            docs_total_duration = time.time() - docs_start
-            time_saved = (rfp_duration + proposal_duration) - docs_total_duration
-            
-            st.session_state.rfp_content = rfp_content
-            st.session_state.proposal_content = proposal_content
-            st.session_state.step_durations["rfp_processing"] = rfp_duration
-            st.session_state.step_durations["proposal_processing"] = proposal_duration
-            st.session_state.step_durations["docs_parallel_total"] = docs_total_duration
-            st.session_state.step_durations["parallel_time_saved"] = time_saved
-            
-            step1_container.markdown(f"✅ **1. Processing RFP document... Done!** `{format_duration(rfp_duration)}`")
-            step2_container.markdown(f"✅ **2. Processing Proposal document... Done!** `{format_duration(proposal_duration)}`")
-            logger.info("STEP 1-2 completed in %.2fs (parallel) - RFP: %.2fs, Proposal: %.2fs, Time saved: %.2fs", 
-                       docs_total_duration, rfp_duration, proposal_duration, time_saved)
-            progress_bar.progress(50)
-            
-            # Step 3: Scoring with AI Reasoning
-            step3_start = time.time()
-            scoring_version = st.session_state.scoring_version
-            
-            # For V2, we have two sub-steps: extraction and scoring
-            step3a_container = st.empty()  # Criteria extraction (V2 only)
-            step3b_container = st.empty()  # Proposal scoring (V2) or combined scoring (V1)
-            
-            if scoring_version == "v2":
-                logger.info("STEP 3: Multi-Agent Scoring (V2)...")
+        # Start timer update loop in a separate display
+        def render_status():
+            """Render the current queue status."""
+            with status_placeholder.container():
+                # Overall progress
+                elapsed = time.time() - pipeline_start
+                st.markdown(f"**⏱️ Elapsed: `{format_duration(elapsed)}`** | Processing {total_files} documents in parallel...")
                 
-                # Show V2 sub-steps
-                step3_container.markdown("**3. AI Evaluation (Multi Agents V2)**")
-                step3a_container.markdown("""
-                    <div class="processing-container">
-                        <span class="spinner"></span>
-                        <strong>3a. Extracting scoring criteria from RFP...</strong>
-                        <span class="duration-badge">🔍 Analyzing requirements...</span>
-                    </div>
-                """, unsafe_allow_html=True)
-                step3b_container.markdown("⬜ 3b. Scoring proposal against criteria...")
-                status_text.text("🔍 Agent 1: Analyzing RFP to extract evaluation criteria...")
+                # Progress bar
+                progress = extraction_queue.get_progress()
+                st.progress(progress["percentage"] / 100)
                 
-                # Track V2 phase durations
-                phase1_duration = 0
-                phase2_duration = 0
-                
-                def v2_progress_callback(phase_message: str):
-                    nonlocal phase1_duration
-                    if "Phase 2" in phase_message or "Scoring" in phase_message:
-                        # Phase 1 complete, update UI for phase 2
-                        phase1_duration = time.time() - step3_start
-                        step3a_container.markdown(f"✅ **3a. Extracting criteria... Done!** `{format_duration(phase1_duration)}`")
-                        step3b_container.markdown("""
-                            <div class="processing-container">
-                                <span class="spinner"></span>
-                                <strong>3b. Scoring proposal against criteria...</strong>
-                                <span class="duration-badge">📊 Evaluating proposal...</span>
-                            </div>
-                        """, unsafe_allow_html=True)
-                        status_text.text("📊 Agent 2: Evaluating proposal against extracted criteria...")
-                        progress_bar.progress(75)
-                
-                results, scoring_duration = asyncio.run(
-                    evaluate_proposal(
-                        st.session_state.rfp_content,
-                        st.session_state.proposal_content,
-                        scoring_guide,
-                        version=scoring_version,
-                        reasoning_effort=st.session_state.reasoning_effort,
-                        progress_callback=v2_progress_callback
-                    )
-                )
-                
-                # Get actual phase durations from metadata
-                metadata = results.get("_metadata", {})
-                phase1_actual = metadata.get("phase1_criteria_extraction_seconds", phase1_duration)
-                phase2_actual = metadata.get("phase2_proposal_scoring_seconds", 0)
-                
-                step3a_container.markdown(f"✅ **3a. Extracting criteria... Done!** `{format_duration(phase1_actual)}`")
-                step3b_container.markdown(f"✅ **3b. Scoring proposal... Done!** `{format_duration(phase2_actual)}`")
-                
+                # Items status
+                for item in extraction_queue.items:
+                    icon = item.get_status_icon()
+                    elapsed_time = format_duration(item.get_elapsed_time()) if item.start_time else "-"
+                    
+                    if item.item_type == "rfp":
+                        label = f"📄 RFP: {item.name}"
+                    else:
+                        label = f"📝 Proposal: {item.name}"
+                    
+                    if item.status == QueueItemStatus.COMPLETED:
+                        st.success(f"{icon} {label} — `{elapsed_time}`")
+                    elif item.status == QueueItemStatus.PROCESSING:
+                        st.info(f"{icon} {label} — Processing... `{elapsed_time}`")
+                    elif item.status == QueueItemStatus.FAILED:
+                        st.error(f"{icon} {label} — Failed")
+                    else:
+                        st.warning(f"{icon} {label} — Waiting...")
+        
+        # Initial render
+        render_status()
+        
+        # Run parallel processing
+        results = asyncio.run(process_all_documents())
+        
+        # Process results and update queue
+        extracted_results = []
+        for i, result in enumerate(results):
+            item_id = "rfp" if i == 0 else f"proposal_{i-1}"
+            item = extraction_queue.get_item(item_id)
+            
+            if isinstance(result, Exception):
+                item.fail(str(result))
+                logger.error("Failed to extract document %d: %s", i, str(result))
+                extracted_results.append((None, 0))
             else:
-                logger.info("STEP 3: AI Reasoning & Scoring (V1)...")
-                step3_container.markdown("""
-                    <div class="processing-container">
-                        <span class="spinner"></span>
-                        <strong>3. AI Reasoning & Scoring (V1)...</strong>
-                        <span class="duration-badge">🧠 Deep analysis in progress...</span>
-                    </div>
-                """, unsafe_allow_html=True)
-                status_text.text("🧠 AI Agent is performing deep reasoning analysis (this may take a moment)...")
+                content, duration = result
+                item.complete(result=content)
+                extracted_results.append((content, duration))
+                logger.info("Extracted document %d in %.2fs", i, duration)
+        
+        # Final render
+        render_status()
+        
+        # Check for failures
+        failed_items = extraction_queue.get_failed_items()
+        if failed_items:
+            raise Exception(f"Failed to extract {len(failed_items)} document(s)")
+        
+        # Store results
+        rfp_content, rfp_duration = extracted_results[0]
+        st.session_state.rfp_content = rfp_content
+        st.session_state.step_durations["rfp_processing"] = rfp_duration
+        
+        proposal_contents = {}
+        for i, file_data in enumerate(st.session_state.proposal_files):
+            content, duration = extracted_results[i + 1]
+            proposal_contents[file_data["name"]] = content
+            st.session_state.step_durations[f"proposal_{i}_processing"] = duration
+        
+        st.session_state.proposal_contents = proposal_contents
+        
+        extraction_queue.finish()
+        st.session_state.extraction_queue = extraction_queue
+        
+        total_duration = time.time() - pipeline_start
+        st.session_state.step_durations["extraction_total"] = total_duration
+        
+        logger.info("====== EXTRACTION PIPELINE COMPLETED in %.2fs ======", total_duration)
+        
+        # Show completion message
+        st.success(f"✅ **All {total_files} documents extracted in {format_duration(total_duration)}!**")
+        
+        time.sleep(1)
+        st.rerun()
+        
+    except Exception as e:
+        logger.error("Extraction pipeline failed: %s", str(e))
+        extraction_queue.finish()
+        st.session_state.extraction_queue = extraction_queue
+        st.error(f"❌ Error during extraction: {str(e)}")
+
+
+def render_step3():
+    """Step 3: Evaluate and Compare."""
+    mode_label = "Individual Scoring" if st.session_state.evaluation_mode == "individual" else "Combined Scoring"
+    st.header(f"Step 3: Evaluate & Compare ({mode_label})")
+    st.markdown("Evaluating vendor proposals against RFP requirements and generating comparison.")
+    
+    # Show files summary
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.session_state.rfp_file:
+            st.info(f"📄 RFP: {st.session_state.rfp_file['name']}")
+    with col2:
+        if st.session_state.proposal_files:
+            st.info(f"📝 Proposals: {len(st.session_state.proposal_files)} file(s)")
+    
+    # Show evaluation process info
+    with st.expander("🤖 Multi-Agent Evaluation Process", expanded=False):
+        st.info("""
+        **Evaluation Process:**
+        
+        1. **Criteria Extraction Agent**: Analyzes the RFP document to automatically 
+           extract scoring criteria with weights (totaling 100%).
+        
+        2. **Proposal Scoring Agent**: Evaluates each vendor proposal against the 
+           extracted criteria, providing detailed scores and justifications.
+        
+        3. **Comparison Agent**: Compares all vendor scores and generates a 
+           comprehensive comparison report with rankings.
+        
+        This approach ensures that scoring is tailored to each specific RFP's requirements.
+        """)
+    
+    # Check if evaluation has been completed
+    if st.session_state.evaluation_results and st.session_state.comparison_results:
+        render_comparison_results()
+    else:
+        # Start evaluation
+        if st.button("🎯 Start Evaluation", type="primary", use_container_width=True):
+            run_evaluation_pipeline()
+    
+    # Navigation
+    st.markdown("---")
+    if st.button("⬅️ Back to Step 2"):
+        st.session_state.step = 2
+        st.session_state.evaluation_results = []
+        st.session_state.comparison_results = None
+        st.rerun()
+
+
+def run_evaluation_pipeline():
+    """Run the full multi-vendor evaluation pipeline with parallel processing and clean UI."""
+    reasoning_effort = st.session_state.reasoning_effort
+    evaluation_mode = st.session_state.evaluation_mode
+    global_criteria = st.session_state.global_criteria
+    
+    logger.info("====== EVALUATION PIPELINE STARTED (Mode: %s, Effort: %s) ======", 
+               evaluation_mode, reasoning_effort)
+    pipeline_start = time.time()
+    
+    # Inject animation CSS
+    st.markdown(STEP_ANIMATION_CSS, unsafe_allow_html=True)
+    
+    # Create scoring queue
+    scoring_queue = ProcessingQueue(name="Proposal Scoring")
+    proposal_files = st.session_state.proposal_files
+    
+    if evaluation_mode == "individual":
+        # Add each proposal as a separate queue item
+        for i, proposal_file in enumerate(proposal_files):
+            scoring_queue.add_item(
+                id=f"proposal_{i}",
+                name=proposal_file['name'],
+                item_type="evaluation",
+                metadata={"filename": proposal_file["name"]}
+            )
+    else:
+        # Combined mode - single item for all
+        scoring_queue.add_item(
+            id="combined",
+            name=f"Combined Evaluation ({len(proposal_files)} proposals)",
+            item_type="combined_evaluation",
+            metadata={"proposal_count": len(proposal_files)}
+        )
+    
+    # Add comparison step if multiple proposals in individual mode
+    if len(proposal_files) > 1 and evaluation_mode == "individual":
+        scoring_queue.add_item(
+            id="comparison",
+            name="Vendor Comparison",
+            item_type="comparison",
+            metadata={}
+        )
+    
+    scoring_queue.start()
+    st.session_state.scoring_queue = scoring_queue
+    
+    # UI Setup - single placeholder for clean updates
+    st.subheader("🎯 Evaluating Proposals")
+    status_placeholder = st.empty()
+    
+    def render_status():
+        """Render the current scoring status."""
+        with status_placeholder.container():
+            elapsed = time.time() - pipeline_start
+            st.markdown(f"**⏱️ Elapsed: `{format_duration(elapsed)}`**")
+            
+            # Progress bar
+            progress = scoring_queue.get_progress()
+            st.progress(progress["percentage"] / 100)
+            
+            # Items status
+            for item in scoring_queue.items:
+                icon = item.get_status_icon()
+                elapsed_time = format_duration(item.get_elapsed_time()) if item.start_time else "-"
                 
-                results, scoring_duration = asyncio.run(
+                if item.item_type == "comparison":
+                    label = f"📊 {item.name}"
+                else:
+                    label = f"📝 {item.name}"
+                
+                if item.status == QueueItemStatus.COMPLETED:
+                    extra = ""
+                    if item.result and isinstance(item.result, dict) and "total_score" in item.result:
+                        score = item.result["total_score"]
+                        grade = item.result.get("grade", "")
+                        extra = f" — Score: **{score:.1f}** ({grade})"
+                    st.success(f"{icon} {label}{extra} — `{elapsed_time}`")
+                elif item.status == QueueItemStatus.PROCESSING:
+                    st.info(f"{icon} {label} — Processing... `{elapsed_time}`")
+                elif item.status == QueueItemStatus.FAILED:
+                    st.error(f"{icon} {label} — Failed: {item.error_message}")
+                else:
+                    st.warning(f"{icon} {label} — Waiting...")
+    
+    try:
+        evaluation_results = []
+        
+        if evaluation_mode == "individual":
+            # Mark all proposal items as processing
+            for i in range(len(proposal_files)):
+                item = scoring_queue.get_item(f"proposal_{i}")
+                item.start()
+            
+            render_status()
+            
+            # Define async function for parallel proposal evaluation
+            async def evaluate_all_proposals():
+                tasks = []
+                for i, proposal_file in enumerate(proposal_files):
+                    proposal_name = proposal_file["name"]
+                    proposal_content = st.session_state.proposal_contents.get(proposal_name, "")
+                    
+                    task = evaluate_proposal(
+                        st.session_state.rfp_content,
+                        proposal_content,
+                        global_criteria=global_criteria,
+                        reasoning_effort=reasoning_effort
+                    )
+                    tasks.append(task)
+                return await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # Run parallel evaluation
+            results = asyncio.run(evaluate_all_proposals())
+            
+            # Process results
+            for i, result in enumerate(results):
+                proposal_name = proposal_files[i]["name"]
+                item = scoring_queue.get_item(f"proposal_{i}")
+                
+                if isinstance(result, Exception):
+                    item.fail(str(result))
+                    logger.error("Failed to evaluate %s: %s", proposal_name, str(result))
+                else:
+                    eval_result, duration = result
+                    eval_result["_proposal_file"] = proposal_name
+                    evaluation_results.append(eval_result)
+                    item.complete(result=eval_result)
+                    st.session_state.step_durations[f"eval_{proposal_name}"] = duration
+                    logger.info("Proposal %s evaluated in %.2fs", proposal_name, duration)
+            
+            render_status()
+            
+            # Check for failures using get_failed_items
+            failed_items = scoring_queue.get_failed_items()
+            if failed_items:
+                raise Exception(f"Failed to evaluate {len(failed_items)} proposal(s)")
+            
+        else:
+            # Combined evaluation - score all together
+            item = scoring_queue.get_item("combined")
+            item.start()
+            
+            render_status()
+            
+            # Combine all proposal contents
+            combined_content = ""
+            for proposal_file in proposal_files:
+                proposal_name = proposal_file["name"]
+                proposal_content = st.session_state.proposal_contents.get(proposal_name, "")
+                combined_content += f"\n\n## Vendor Proposal: {proposal_name}\n\n{proposal_content}"
+            
+            # Check content length
+            estimated_tokens = len(combined_content) // 4
+            max_tokens = 100000
+            
+            if estimated_tokens > max_tokens:
+                logger.warning("Combined content exceeds token limit, chunking required")
+                st.warning(f"⚠️ Combined content is large ({estimated_tokens:,} estimated tokens). Results may be truncated.")
+            
+            try:
+                result, duration = asyncio.run(
                     evaluate_proposal(
                         st.session_state.rfp_content,
-                        st.session_state.proposal_content,
-                        scoring_guide,
-                        version=scoring_version,
-                        reasoning_effort=st.session_state.reasoning_effort
+                        combined_content,
+                        global_criteria=global_criteria,
+                        reasoning_effort=reasoning_effort
                     )
                 )
                 
-                step3_container.markdown(f"✅ **3. AI Scoring (V1)... Done!** `{format_duration(scoring_duration)}`")
+                result["_proposal_file"] = "Combined Evaluation"
+                evaluation_results.append(result)
+                item.complete(result=result)
+                st.session_state.step_durations["eval_combined"] = duration
+                
+            except Exception as e:
+                item.fail(str(e))
+                raise
             
-            st.session_state.scoring_results = results
-            st.session_state.step_durations["scoring"] = scoring_duration
+            render_status()
+        
+        st.session_state.evaluation_results = evaluation_results
+        
+        # Step 2: Compare results (if multiple proposals in individual mode)
+        if len(evaluation_results) > 1 and evaluation_mode == "individual":
+            comparison_item = scoring_queue.get_item("comparison")
+            comparison_item.start()
             
-            logger.info("STEP 3 completed in %.2fs", scoring_duration)
-            progress_bar.progress(100)
+            render_status()
             
-            # Calculate total duration
-            total_duration = time.time() - pipeline_start
-            st.session_state.step_durations["total"] = total_duration
+            try:
+                comparison_agent = ComparisonAgent()
+                rfp_title = evaluation_results[0].get("rfp_title", "RFP Evaluation")
+                
+                comparison_results = asyncio.run(
+                    comparison_agent.compare_evaluations(
+                        evaluation_results,
+                        rfp_title,
+                        reasoning_effort=reasoning_effort
+                    )
+                )
+                
+                st.session_state.comparison_results = comparison_results
+                comparison_item.complete(result=comparison_results)
+                logger.info("Comparison completed")
+                
+            except Exception as e:
+                comparison_item.fail(str(e))
+                raise
+        else:
+            # Single proposal or combined mode - create basic comparison structure
+            if evaluation_results:
+                st.session_state.comparison_results = {
+                    "rfp_title": evaluation_results[0].get("rfp_title", "RFP Evaluation"),
+                    "total_vendors": len(evaluation_results),
+                    "vendor_rankings": [{
+                        "rank": 1,
+                        "vendor_name": evaluation_results[0].get("supplier_name", "Unknown"),
+                        "total_score": evaluation_results[0].get("total_score", 0),
+                        "grade": evaluation_results[0].get("grade", "N/A"),
+                        "key_strengths": evaluation_results[0].get("overall_strengths", [])[:3],
+                        "key_concerns": evaluation_results[0].get("overall_weaknesses", [])[:3],
+                        "recommendation": evaluation_results[0].get("recommendation", "")
+                    }],
+                    "selection_recommendation": evaluation_results[0].get("recommendation", ""),
+                    "comparison_insights": []
+                }
+        
+        scoring_queue.finish()
+        st.session_state.scoring_queue = scoring_queue
+        
+        total_duration = time.time() - pipeline_start
+        st.session_state.step_durations["evaluation_total"] = total_duration
+        
+        logger.info("====== EVALUATION PIPELINE COMPLETED in %.2fs ======", total_duration)
+        
+        # Final render
+        render_status()
+        
+        st.success(f"✅ **Evaluation complete in {format_duration(total_duration)}!**")
+        
+        time.sleep(1)
+        st.rerun()
+        
+    except Exception as e:
+        logger.error("Evaluation pipeline failed: %s", str(e))
+        scoring_queue.finish()
+        st.session_state.scoring_queue = scoring_queue
+        render_status()
+        st.error(f"❌ Error during evaluation: {str(e)}")
+
+
+def render_comparison_results():
+    """Render the multi-vendor comparison results."""
+    st.markdown("---")
+    
+    comparison = st.session_state.comparison_results
+    evaluations = st.session_state.evaluation_results
+    
+    # Display timing if available
+    if st.session_state.step_durations:
+        total_time = st.session_state.step_durations.get("evaluation_total", 0)
+        st.info(f"⏱️ Total evaluation time: {format_duration(total_time)}")
+    
+    # Vendor Rankings Summary
+    st.subheader("🏆 Vendor Rankings")
+    
+    rankings = comparison.get("vendor_rankings", [])
+    if rankings:
+        cols = st.columns(min(len(rankings), 4))
+        for i, ranking in enumerate(rankings[:4]):
+            with cols[i]:
+                rank = ranking.get("rank", i+1)
+                medal = "🥇" if rank == 1 else "🥈" if rank == 2 else "🥉" if rank == 3 else "🏅"
+                st.metric(
+                    label=f"{medal} #{rank}",
+                    value=ranking.get("vendor_name", "Unknown")[:20],
+                    delta=f"{ranking.get('total_score', 0):.1f} ({ranking.get('grade', 'N/A')})"
+                )
+    
+    # Selection Recommendation
+    recommendation = comparison.get("selection_recommendation", "")
+    if recommendation:
+        st.success(f"✅ **Recommendation:** {recommendation}")
+    
+    st.markdown("---")
+    
+    # Tabs for different views
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "📊 Dashboard",
+        "🔍 Comparison Overview", 
+        "📋 Individual Reports", 
+        "📈 Detailed Scores",
+        "📥 Export"
+    ])
+    
+    with tab1:
+        render_metrics_dashboard(comparison, evaluations)
+    
+    with tab2:
+        render_comparison_overview(comparison, evaluations)
+    
+    with tab3:
+        render_individual_reports(evaluations)
+    
+    with tab4:
+        render_detailed_scores(evaluations)
+    
+    with tab5:
+        render_export_options(comparison, evaluations)
+
+
+def render_metrics_dashboard(comparison: dict, evaluations: list):
+    """Render the metrics dashboard with pie charts for each criterion/competency."""
+    st.subheader("📊 Metrics Dashboard")
+    st.markdown("Visual comparison of vendor performance across all evaluation criteria.")
+    
+    if not evaluations:
+        st.warning("No evaluations available to display.")
+        return
+    
+    if not PLOTLY_AVAILABLE:
+        st.warning("📊 Plotly is not installed. Install it with `pip install plotly` for interactive charts.")
+        # Fallback to basic metrics display
+        _render_basic_metrics_dashboard(comparison, evaluations)
+        return
+    
+    # Get all criteria from first evaluation
+    criteria = []
+    if evaluations[0].get("criterion_scores"):
+        criteria = evaluations[0]["criterion_scores"]
+    
+    if not criteria:
+        st.warning("No criteria scores available.")
+        return
+    
+    # Overall vendor comparison bar chart (total scores)
+    st.markdown("### 🏆 Overall Vendor Performance")
+    _render_overall_comparison_bar(evaluations)
+    
+    st.markdown("---")
+    st.markdown("### 📈 Performance by Criterion")
+    st.markdown("Each chart shows how vendor scores compare for a specific evaluation criterion. "
+                "Taller bars indicate higher scores.")
+    
+    # Create bar charts for each criterion
+    num_criteria = len(criteria)
+    cols_per_row = 2
+    
+    for i in range(0, num_criteria, cols_per_row):
+        cols = st.columns(cols_per_row)
+        
+        for j in range(cols_per_row):
+            criterion_idx = i + j
+            if criterion_idx >= num_criteria:
+                break
+                
+            criterion = criteria[criterion_idx]
+            criterion_name = criterion.get("criterion_name", f"Criterion {criterion_idx + 1}")
+            criterion_weight = criterion.get("weight", 0)
             
-            # Calculate time saved from parallel processing
-            time_saved = st.session_state.step_durations.get("parallel_time_saved", 0)
+            with cols[j]:
+                _render_criterion_bar_chart(evaluations, criterion_idx, criterion_name, criterion_weight)
+    
+    # Vendor recommendation section
+    st.markdown("---")
+    st.markdown("### 💡 Vendor Recommendations by Criterion")
+    _render_criterion_recommendations(comparison, evaluations)
+
+
+def _render_overall_comparison_bar(evaluations: list):
+    """Render bar chart showing overall vendor comparison."""
+    vendor_names = []
+    total_scores = []
+    grades = []
+    
+    for eval_result in evaluations:
+        vendor_name = eval_result.get("supplier_name", "Unknown")
+        total_score = eval_result.get("total_score", 0)
+        grade = eval_result.get("grade", "N/A")
+        vendor_names.append(vendor_name)
+        total_scores.append(total_score)
+        grades.append(grade)
+    
+    # Sort by score descending
+    sorted_data = sorted(zip(vendor_names, total_scores, grades), key=lambda x: x[1], reverse=True)
+    vendor_names, total_scores, grades = zip(*sorted_data) if sorted_data else ([], [], [])
+    
+    # Create bar chart
+    fig = px.bar(
+        x=list(vendor_names),
+        y=list(total_scores),
+        title="Total Score Comparison",
+        labels={"x": "Vendor", "y": "Total Score"},
+        color=list(total_scores),
+        color_continuous_scale="RdYlGn",
+        text=[f"{s:.1f} ({g})" for s, g in zip(total_scores, grades)]
+    )
+    
+    fig.update_traces(
+        textposition='outside',
+        hovertemplate="<b>%{x}</b><br>Score: %{y:.1f}<extra></extra>"
+    )
+    
+    fig.update_layout(
+        showlegend=False,
+        xaxis_title="Vendor",
+        yaxis_title="Total Score",
+        yaxis_range=[0, 105],
+        margin=dict(t=50, b=50, l=50, r=20),
+        height=400,
+        coloraxis_showscale=False
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def _render_criterion_bar_chart(evaluations: list, criterion_idx: int, criterion_name: str, weight: float):
+    """Render a bar chart for a specific criterion showing vendor scores."""
+    vendor_names = []
+    scores = []
+    
+    for eval_result in evaluations:
+        vendor_name = eval_result.get("supplier_name", "Unknown")
+        criterion_scores = eval_result.get("criterion_scores", [])
+        
+        if criterion_idx < len(criterion_scores):
+            score = criterion_scores[criterion_idx].get("raw_score", 0)
+        else:
+            score = 0
             
-            logger.info("====== EVALUATION PIPELINE COMPLETED ======")
-            logger.info("Total pipeline duration: %.2fs", total_duration)
-            logger.info("Breakdown - Docs (parallel): %.2fs (RFP: %.2fs, Proposal: %.2fs, Saved: %.2fs), Scoring: %.2fs",
-                       docs_total_duration, rfp_duration, proposal_duration, time_saved, scoring_duration)
+        vendor_names.append(vendor_name)
+        scores.append(score)
+    
+    # Sort by score descending
+    sorted_data = sorted(zip(vendor_names, scores), key=lambda x: x[1], reverse=True)
+    vendor_names, scores = zip(*sorted_data) if sorted_data else ([], [])
+    
+    # Find best vendor for this criterion
+    best_vendor = vendor_names[0] if vendor_names else "N/A"
+    best_score = scores[0] if scores else 0
+    
+    # Create bar chart
+    fig = px.bar(
+        x=list(vendor_names),
+        y=list(scores),
+        title=f"{criterion_name}<br><sup>Weight: {weight:.1f}% | Best: {best_vendor} ({best_score:.1f})</sup>",
+        labels={"x": "Vendor", "y": "Score"},
+        color=list(scores),
+        color_continuous_scale="RdYlGn",
+        text=[f"{s:.1f}" for s in scores]
+    )
+    
+    fig.update_traces(
+        textposition='outside',
+        hovertemplate="<b>%{x}</b><br>Score: %{y:.1f}/100<extra></extra>"
+    )
+    
+    fig.update_layout(
+        showlegend=False,
+        xaxis_title="",
+        yaxis_title="Score",
+        yaxis_range=[0, 105],
+        margin=dict(t=60, b=30, l=40, r=10),
+        height=300,
+        coloraxis_showscale=False,
+        xaxis_tickangle=-45 if len(vendor_names) > 3 else 0
+    )
+    
+    st.plotly_chart(fig, use_container_width=True, key=f"bar_{criterion_idx}")
+
+
+def _render_criterion_recommendations(comparison: dict, evaluations: list):
+    """Render recommendations for each criterion based on vendor performance."""
+    criterion_comparisons = comparison.get("criterion_comparisons", [])
+    
+    if not criterion_comparisons:
+        # Fall back to generating recommendations from evaluations
+        if not evaluations or not evaluations[0].get("criterion_scores"):
+            return
             
-            saved_msg = f" (saved {format_duration(time_saved)} with parallel processing)" if time_saved > 1 else ""
-            status_text.success(f"✨ Evaluation complete! Total time: {format_duration(total_duration)}{saved_msg}")
+        criteria = evaluations[0]["criterion_scores"]
+        for criterion_idx, criterion in enumerate(criteria):
+            criterion_name = criterion.get("criterion_name", f"Criterion {criterion_idx + 1}")
             
-            # Clear progress indicators after a moment
-            st.rerun()
+            # Find best vendor for this criterion
+            best_vendor = None
+            best_score = -1
+            all_scores = []
             
-        except Exception as e:
-            logger.error("Pipeline failed with error: %s", str(e))
-            status_text.empty()
-            st.error(f"Error during evaluation: {str(e)}")
+            for eval_result in evaluations:
+                vendor_name = eval_result.get("supplier_name", "Unknown")
+                criterion_scores = eval_result.get("criterion_scores", [])
+                
+                if criterion_idx < len(criterion_scores):
+                    score = criterion_scores[criterion_idx].get("raw_score", 0)
+                    all_scores.append((vendor_name, score))
+                    if score > best_score:
+                        best_score = score
+                        best_vendor = vendor_name
+            
+            if best_vendor:
+                with st.expander(f"**{criterion_name}** - Recommended: {best_vendor}"):
+                    st.markdown(f"**Best Performer:** {best_vendor} (Score: {best_score:.1f}/100)")
+                    
+                    # Show all vendor scores
+                    st.markdown("**All Vendors:**")
+                    for vendor, score in sorted(all_scores, key=lambda x: x[1], reverse=True):
+                        icon = "🥇" if vendor == best_vendor else "📊"
+                        st.markdown(f"  {icon} {vendor}: {score:.1f}/100")
+    else:
+        # Use the comparison agent's criterion comparisons
+        for cc in criterion_comparisons:
+            criterion_name = cc.get("criterion_name", "Unknown")
+            best_vendor = cc.get("best_vendor", "N/A")
+            worst_vendor = cc.get("worst_vendor", "N/A")
+            score_range = cc.get("score_range", "N/A")
+            insights = cc.get("insights", "")
+            weight = cc.get("weight", 0)
+            
+            with st.expander(f"**{criterion_name}** (Weight: {weight:.1f}%) - Recommended: {best_vendor}"):
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("🥇 Best", best_vendor)
+                with col2:
+                    st.metric("📉 Lowest", worst_vendor)
+                with col3:
+                    st.metric("📊 Score Range", score_range)
+                
+                if insights:
+                    st.markdown(f"**Why choose {best_vendor}:** {insights}")
+
+
+def _render_basic_metrics_dashboard(comparison: dict, evaluations: list):
+    """Render a basic metrics dashboard without plotly charts."""
+    st.markdown("### Vendor Performance Summary")
+    
+    # Overall comparison table
+    st.markdown("#### Total Scores")
+    for eval_result in sorted(evaluations, key=lambda x: x.get("total_score", 0), reverse=True):
+        vendor_name = eval_result.get("supplier_name", "Unknown")
+        total_score = eval_result.get("total_score", 0)
+        grade = eval_result.get("grade", "N/A")
+        
+        # Progress bar visualization
+        st.markdown(f"**{vendor_name}**: {total_score:.1f}/100 ({grade})")
+        st.progress(min(total_score / 100, 1.0))
+    
+    st.markdown("---")
+    st.markdown("#### Criterion Scores")
+    
+    if evaluations and evaluations[0].get("criterion_scores"):
+        criteria = evaluations[0]["criterion_scores"]
+        
+        for criterion_idx, criterion in enumerate(criteria):
+            criterion_name = criterion.get("criterion_name", f"Criterion {criterion_idx + 1}")
+            criterion_weight = criterion.get("weight", 0)
+            
+            st.markdown(f"**{criterion_name}** (Weight: {criterion_weight:.1f}%)")
+            
+            for eval_result in evaluations:
+                vendor_name = eval_result.get("supplier_name", "Unknown")
+                criterion_scores = eval_result.get("criterion_scores", [])
+                
+                if criterion_idx < len(criterion_scores):
+                    score = criterion_scores[criterion_idx].get("raw_score", 0)
+                    col1, col2 = st.columns([3, 1])
+                    with col1:
+                        st.progress(min(score / 100, 1.0))
+                    with col2:
+                        st.write(f"{vendor_name[:15]}: {score:.1f}")
+
+
+def render_comparison_overview(comparison: dict, evaluations: list):
+    """Render the comparison overview tab."""
+    st.subheader("📊 Multi-Vendor Comparison")
+    
+    # Comparison insights
+    insights = comparison.get("comparison_insights", [])
+    if insights:
+        st.markdown("### Key Insights")
+        for insight in insights:
+            st.markdown(f"• {insight}")
+    
+    # Winner summary
+    winner_summary = comparison.get("winner_summary", "")
+    if winner_summary:
+        st.markdown("### Winner Summary")
+        st.info(winner_summary)
+    
+    # Risk comparison
+    risk_comparison = comparison.get("risk_comparison", "")
+    if risk_comparison:
+        st.markdown("### Risk Assessment")
+        st.warning(risk_comparison)
+    
+    # Criterion comparisons
+    criterion_comparisons = comparison.get("criterion_comparisons", [])
+    if criterion_comparisons:
+        st.markdown("### Performance by Criterion")
+        
+        for cc in criterion_comparisons:
+            with st.expander(f"**{cc.get('criterion_name', 'Unknown')}** (Weight: {cc.get('weight', 0):.1f}%)"):
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Best Performer", cc.get("best_vendor", "N/A"))
+                with col2:
+                    st.metric("Score Range", cc.get("score_range", "N/A"))
+                st.caption(cc.get("insights", ""))
+
+
+def render_individual_reports(evaluations: list):
+    """Render individual vendor reports."""
+    st.subheader("📋 Individual Vendor Reports")
+    
+    for i, eval_result in enumerate(evaluations):
+        vendor_name = eval_result.get("supplier_name", f"Vendor {i+1}")
+        proposal_file = eval_result.get("_proposal_file", "Unknown")
+        total_score = eval_result.get("total_score", 0)
+        grade = eval_result.get("grade", "N/A")
+        
+        with st.expander(f"**{vendor_name}** - Score: {total_score:.1f} ({grade})", expanded=i==0):
+            # Score summary
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Total Score", f"{total_score:.1f}")
+            with col2:
+                st.metric("Grade", grade)
+            with col3:
+                st.metric("File", proposal_file[:25] + "..." if len(proposal_file) > 25 else proposal_file)
+            
+            # Criterion scores with justifications
+            st.markdown("#### Criterion Scores & Justifications")
+            criterion_scores = eval_result.get("criterion_scores", [])
+            for cs in criterion_scores:
+                score_pct = cs.get("raw_score", 0)
+                bar_color = "🟢" if score_pct >= 80 else "🟡" if score_pct >= 60 else "🟠" if score_pct >= 40 else "🔴"
+                criterion_name = cs.get('criterion_name', 'Unknown')
+                weighted_score = cs.get('weighted_score', 0)
+                justification = cs.get('justification', '')
+                
+                # Show criterion score with expandable justification
+                with st.container():
+                    st.markdown(f"{bar_color} **{criterion_name}**: {score_pct:.1f}/100 (weighted: {weighted_score:.2f})")
+                    if justification:
+                        with st.expander("📝 View Justification", expanded=False):
+                            st.markdown(justification)
+                    
+                    # Show strengths and gaps for this criterion if available
+                    strengths = cs.get('strengths', [])
+                    gaps = cs.get('gaps', [])
+                    if strengths or gaps:
+                        col_s, col_g = st.columns(2)
+                        with col_s:
+                            if strengths:
+                                st.markdown("**Strengths:**")
+                                for s in strengths[:3]:
+                                    st.markdown(f"  ✅ {s}")
+                        with col_g:
+                            if gaps:
+                                st.markdown("**Gaps:**")
+                                for g in gaps[:3]:
+                                    st.markdown(f"  ⚠️ {g}")
+                    st.markdown("---")
+            
+            # Overall Strengths and weaknesses
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown("#### Overall Strengths")
+                for s in eval_result.get("overall_strengths", []):
+                    st.markdown(f"✅ {s}")
+            with col2:
+                st.markdown("#### Overall Weaknesses")
+                for w in eval_result.get("overall_weaknesses", []):
+                    st.markdown(f"⚠️ {w}")
+            
+            # Executive summary
+            st.markdown("#### Executive Summary")
+            st.markdown(eval_result.get("executive_summary", "No summary available."))
+
+
+def render_detailed_scores(evaluations: list):
+    """Render detailed score comparison table."""
+    st.subheader("📈 Detailed Score Comparison")
+    
+    if not evaluations:
+        st.warning("No evaluations available.")
+        return
+    
+    # Build comparison data
+    # Get all criteria from first evaluation
+    criteria = []
+    if evaluations[0].get("criterion_scores"):
+        criteria = [cs.get("criterion_name", cs.get("criterion_id", f"C-{i}")) 
+                   for i, cs in enumerate(evaluations[0]["criterion_scores"])]
+    
+    # Create comparison table data
+    table_data = []
+    for criterion_idx, criterion_name in enumerate(criteria):
+        row = {"Criterion": criterion_name}
+        for eval_result in evaluations:
+            vendor_name = eval_result.get("supplier_name", "Unknown")[:15]
+            scores = eval_result.get("criterion_scores", [])
+            if criterion_idx < len(scores):
+                row[vendor_name] = f"{scores[criterion_idx].get('raw_score', 0):.1f}"
+            else:
+                row[vendor_name] = "N/A"
+        table_data.append(row)
+    
+    # Add total row
+    total_row = {"Criterion": "**TOTAL SCORE**"}
+    for eval_result in evaluations:
+        vendor_name = eval_result.get("supplier_name", "Unknown")[:15]
+        total_row[vendor_name] = f"**{eval_result.get('total_score', 0):.1f}**"
+    table_data.append(total_row)
+    
+    st.table(table_data)
+
+
+def render_export_options(comparison: dict, evaluations: list):
+    """Render export options for reports."""
+    st.subheader("📥 Export Reports")
+    
+    # Full Analysis Report (with comparison)
+    st.markdown("### 📑 Full Analysis Report")
+    st.markdown("Complete report including comparison, rankings, and all vendor details.")
+    
+    if comparison and evaluations:
+        full_report = generate_full_analysis_report(comparison, evaluations)
+        if full_report:
+            st.download_button(
+                label="📑 Download Full Analysis Report (Word)",
+                data=full_report,
+                file_name="rfp_full_analysis_report.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                use_container_width=True,
+                key="full_analysis_report"
+            )
+        else:
+            st.caption("Word export not available. Install python-docx with: pip install python-docx")
+    
+    st.markdown("---")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.markdown("### 📊 CSV Comparison")
+        if comparison and evaluations:
+            comparison_agent = ComparisonAgent()
+            csv_content = comparison_agent.generate_csv_report(comparison, evaluations)
+            st.download_button(
+                label="📊 Download CSV",
+                data=csv_content,
+                file_name="vendor_comparison.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+    
+    with col2:
+        st.markdown("### 📋 JSON Data")
+        full_data = {
+            "comparison": comparison,
+            "evaluations": evaluations
+        }
+        st.download_button(
+            label="📋 Download JSON",
+            data=json.dumps(full_data, indent=2),
+            file_name="evaluation_data.json",
+            mime="application/json",
+            use_container_width=True
+        )
+    
+    with col3:
+        st.markdown("### 📄 Individual Reports")
+        st.caption("Detailed Word report for each vendor")
+    
+    # Individual vendor reports in a separate section
+    st.markdown("### 📄 Individual Vendor Reports (Word)")
+    st.markdown("Detailed reports with criterion justifications for each vendor.")
+    
+    vendor_cols = st.columns(min(len(evaluations), 4))
+    for i, eval_result in enumerate(evaluations):
+        col_idx = i % min(len(evaluations), 4)
+        with vendor_cols[col_idx]:
+            vendor_name = eval_result.get("supplier_name", f"Vendor_{i+1}").replace(" ", "_")
+            word_doc = generate_word_report(eval_result)
+            if word_doc:
+                st.download_button(
+                    label=f"📄 {vendor_name[:20]}",
+                    data=word_doc,
+                    file_name=f"report_{vendor_name}.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    use_container_width=True,
+                    key=f"word_{i}"
+                )
+            else:
+                st.caption(f"Not available for {vendor_name[:15]}")
 
 
 def render_results(results: dict):
