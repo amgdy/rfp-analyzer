@@ -1009,8 +1009,8 @@ def run_evaluation_pipeline():
             
             render_status()
             
-            # Check for failures
-            failed_items = [item for item in scoring_queue.items if item.status == QueueItemStatus.FAILED and item.item_type == "evaluation"]
+            # Check for failures using get_failed_items
+            failed_items = scoring_queue.get_failed_items()
             if failed_items:
                 raise Exception(f"Failed to evaluate {len(failed_items)} proposal(s)")
             
