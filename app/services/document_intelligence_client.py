@@ -51,11 +51,11 @@ class AzureDocumentIntelligenceClient:
         init_start = time.time()
         
         # Get endpoint from environment - use dedicated DI endpoint or fallback to AI endpoint
-        self.endpoint = os.getenv("AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT") or os.getenv("AZURE_AI_ENDPOINT")
+        self.endpoint = os.getenv("AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT") or os.getenv("AZURE_CONTENT_UNDERSTANDING_ENDPOINT")
         
         if not self.endpoint:
             raise ValueError(
-                "AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT or AZURE_AI_ENDPOINT environment variable is required. "
+                "AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT or AZURE_CONTENT_UNDERSTANDING_ENDPOINT environment variable is required. "
                 "Please set it in your .env file."
             )
         

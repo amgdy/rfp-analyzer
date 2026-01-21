@@ -22,7 +22,7 @@ services:
       - .env
     environment:
       # Azure AI Services / Content Understanding
-      - AZURE_AI_ENDPOINT=${AZURE_AI_ENDPOINT}
+      - AZURE_CONTENT_UNDERSTANDING_ENDPOINT=${AZURE_CONTENT_UNDERSTANDING_ENDPOINT}
       - AZURE_AI_API_KEY=${AZURE_AI_API_KEY:-}
       
       # Azure OpenAI

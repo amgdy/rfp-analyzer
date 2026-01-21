@@ -11,3 +11,15 @@ resources:
   rfp-analyzer:
     type: host.containerapp
     port: 8501
+    uses:
+      - ai-project
+  ai-project:
+    type: ai.project
+    models:
+      - name: gpt-5.2
+        version: "2025-12-11"
+        format: OpenAI
+        sku:
+          name: GlobalStandard
+          usageName: OpenAI.GlobalStandard.gpt-5.2
+          capacity: 300

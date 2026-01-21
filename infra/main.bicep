@@ -7,16 +7,22 @@ param environmentName string
 
 @minLength(1)
 @description('Primary location for all resources')
+@metadata({
+  azd: {
+    type: 'location'
+  }
+})
 param location string
 
+@metadata({azd: {
+  type: 'location'
+  usageName: [
+    'OpenAI.GlobalStandard.gpt-5.2,10'
+  ]}
+})
+param foundryLocation string
 
 param rfpAnalyzerExists bool
-
-@description('Id of the user or app to assign application roles')
-param principalId string
-
-@description('Principal type of user or app')
-param principalType string
 
 // Tags that should be applied to all resources.
 // 
@@ -25,25 +31,37 @@ param principalType string
 //   tags: union(tags, { 'azd-service-name': <service name in azure.yaml> })
 var tags = {
   'azd-env-name': environmentName
+  SecurityControl: 'Ignore'
 }
 
-// Organize resources in a resource group
-resource rg 'Microsoft.Resources/resourceGroups@2021-04-01' = {
-  name: 'rg-${environmentName}'
-  location: location
-  tags: tags
+var resourceGroupName = 'rg-${environmentName}'
+
+module rfpResourceGroup 'br/public:avm/res/resources/resource-group:0.4.3' = {
+  params: { 
+    name: resourceGroupName
+    location: location
+    tags: tags
+  }
 }
+
+
 
 module resources 'resources.bicep' = {
-  scope: rg
+  scope: resourceGroup(resourceGroupName)
   name: 'resources'
   params: {
     location: location
     tags: tags
-    principalId: principalId
-    principalType: principalType
     rfpAnalyzerExists: rfpAnalyzerExists
+    foundryLocation: foundryLocation
   }
+  dependsOn: [
+    rfpResourceGroup
+  ]
 }
+
 output AZURE_CONTAINER_REGISTRY_ENDPOINT string = resources.outputs.AZURE_CONTAINER_REGISTRY_ENDPOINT
 output AZURE_RESOURCE_RFP_ANALYZER_ID string = resources.outputs.AZURE_RESOURCE_RFP_ANALYZER_ID
+output AZURE_OPENAI_ENDPOINT string = resources.outputs.AZURE_OPENAI_ENDPOINT
+output AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT string = resources.outputs.AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT
+output AZURE_CONTENT_UNDERSTANDING_ENDPOINT string = resources.outputs.AZURE_CONTENT_UNDERSTANDING_ENDPOINT

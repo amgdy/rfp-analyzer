@@ -73,11 +73,11 @@ class DocumentProcessor:
     
     def _init_content_understanding(self):
         """Initialize Azure Content Understanding client."""
-        self.endpoint = os.getenv("AZURE_AI_ENDPOINT")
+        self.endpoint = os.getenv("AZURE_CONTENT_UNDERSTANDING_ENDPOINT")
         
         if not self.endpoint:
             raise ValueError(
-                "AZURE_AI_ENDPOINT environment variable is required. "
+                "AZURE_CONTENT_UNDERSTANDING_ENDPOINT environment variable is required. "
                 "Please set it in your .env file."
             )
         

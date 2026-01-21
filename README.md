@@ -50,7 +50,7 @@ A Streamlit-based POC application for analyzing RFPs (Request for Proposals) and
    Edit `.env` with your Azure credentials:
    - `AZURE_OPENAI_ENDPOINT`: Your Azure OpenAI endpoint
    - `AZURE_OPENAI_DEPLOYMENT_NAME`: Your deployed model name
-   - `AZURE_AI_ENDPOINT`: Your Azure AI/Content Understanding endpoint
+   - `AZURE_CONTENT_UNDERSTANDING_ENDPOINT`: Your Azure AI/Content Understanding endpoint
    - `AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT`: (Optional) Your Document Intelligence endpoint
 
 3. **Authenticate with Azure:**
@@ -98,7 +98,7 @@ docker build -t rfp-analyzer .
 
 # Run the container
 docker run -p 8501:8501 \
-  -e AZURE_AI_ENDPOINT=your-endpoint \
+  -e AZURE_CONTENT_UNDERSTANDING_ENDPOINT=your-endpoint \
   -e AZURE_OPENAI_ENDPOINT=your-openai-endpoint \
   -e AZURE_OPENAI_DEPLOYMENT_NAME=gpt-4o-mini \
   -e AZURE_TENANT_ID=your-tenant-id \
