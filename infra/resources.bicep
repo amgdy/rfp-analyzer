@@ -254,6 +254,10 @@ module rfpAnalyzer 'br/public:avm/res/app/container-app:0.20.0' = {
             value: modelName
           }
           {
+            name: 'OTEL_LOGGING_ENABLED'
+            value: 'false'
+          }
+          {
             name: 'AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT'
             value: documentIntelligenceEndpoint
           }
