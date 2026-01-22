@@ -7,7 +7,6 @@ across multiple vendors and generates comparison reports.
 
 import os
 import json
-import logging
 import time
 import csv
 import io
@@ -18,6 +17,8 @@ from agent_framework.azure import AzureOpenAIResponsesClient
 from azure.identity import DefaultAzureCredential
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
+
+from .logging_config import get_logger
 
 # Optional dependency for Word document generation
 try:
@@ -30,13 +31,8 @@ except ImportError:
 
 load_dotenv()
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s.%(msecs)03d | %(levelname)s | %(name)s | %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-)
-logger = logging.getLogger(__name__)
+# Get logger from centralized config
+logger = get_logger(__name__)
 
 
 class VendorRanking(BaseModel):

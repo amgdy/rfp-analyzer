@@ -15,30 +15,14 @@ import time
 import logging
 import io
 import json
+import uuid
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 
-# Initialize Azure Monitor / Application Insights telemetry
-# Must be done before other imports to instrument all libraries
-from azure.monitor.opentelemetry import configure_azure_monitor
-from agent_framework.observability import create_resource, enable_instrumentation
+# Initialize centralized logging FIRST (before other imports)
+from services.logging_config import setup_logging, get_logger
+setup_logging()  # Uses OTEL_LOGGING_ENABLED env var (default: False)
 
-
-from opentelemetry import trace
-
-os.environ["AZURE_TRACING_GEN_AI_CONTENT_RECORDING_ENABLED"] = "true" # False by default
-
-
-# Configure Application Insights if connection string is available
-# app_insights_conn_str = os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING")
-# if app_insights_conn_str:
-#     configure_azure_monitor(
-#         connection_string=app_insights_conn_str,
-#         enable_live_metrics=True
-#     )
-
-# # # optional if you do not have ENABLE_INSTRUMENTATION in env vars
-# enable_instrumentation()    
 from services.document_processor import DocumentProcessor, ExtractionService
 from services.scoring_agent_v2 import ScoringAgentV2
 from services.comparison_agent import ComparisonAgent, generate_word_report, generate_full_analysis_report
@@ -65,16 +49,13 @@ try:
 except ImportError:
     PLOTLY_AVAILABLE = False
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s.%(msecs)03d | %(levelname)s | %(name)s | %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-)
-logger = logging.getLogger(__name__)
+# Get logger (logging is already configured at import time)
+logger = get_logger(__name__)
 
-# Get tracer for custom spans
-tracer = trace.get_tracer(__name__)
+# Log application startup
+logger.info("RFP Analyzer application starting...")
+logger.info("Optional features - PDF: %s, Markdown: %s, Plotly: %s", 
+            PDF_AVAILABLE, MARKDOWN_AVAILABLE, PLOTLY_AVAILABLE)
 
 
 def format_duration(seconds: float) -> str:
@@ -325,23 +306,16 @@ async def process_document(
     Returns:
         Tuple of (content, duration_seconds)
     """
-    with tracer.start_as_current_span("process_document") as span:
-        span.set_attribute("document.filename", filename)
-        span.set_attribute("document.size_bytes", len(file_bytes))
-        span.set_attribute("document.extraction_service", extraction_service.value)
-        
-        start_time = time.time()
-        logger.info("Starting document processing: %s using %s", filename, extraction_service.value)
-        
-        processor = DocumentProcessor(service=extraction_service)
-        content = await processor.extract_content(file_bytes, filename)
-        
-        duration = time.time() - start_time
-        span.set_attribute("document.content_length", len(content))
-        span.set_attribute("document.duration_seconds", duration)
-        logger.info("Document processed: %s (%.2fs, %d chars)", filename, duration, len(content))
-        
-        return content, duration
+    start_time = time.time()
+    logger.info("Starting document processing: %s using %s", filename, extraction_service.value)
+    
+    processor = DocumentProcessor(service=extraction_service)
+    content = await processor.extract_content(file_bytes, filename)
+    
+    duration = time.time() - start_time
+    logger.info("Document processed: %s (%.2fs, %d chars)", filename, duration, len(content))
+    
+    return content, duration
 
 
 async def evaluate_proposal(
@@ -363,40 +337,29 @@ async def evaluate_proposal(
     Returns:
         Tuple of (results, duration_seconds)
     """
-    with tracer.start_as_current_span("evaluate_proposal") as span:
-        span.set_attribute("evaluation.reasoning_effort", reasoning_effort)
-        span.set_attribute("evaluation.rfp_content_length", len(rfp_content))
-        span.set_attribute("evaluation.proposal_content_length", len(proposal_content))
-        
-        start_time = time.time()
-        logger.info("Starting proposal evaluation (effort: %s)...", reasoning_effort)
-        
-        # Always use V2 (multi-agent) for evaluation
-        agent = ScoringAgentV2()
-        
-        # Combine RFP content with global criteria if provided
-        if global_criteria:
-            enhanced_rfp = f"{rfp_content}\n\n## Additional Evaluation Criteria (User Specified)\n\n{global_criteria}"
-        else:
-            enhanced_rfp = rfp_content
-        
-        results = await agent.evaluate(
-            enhanced_rfp, 
-            proposal_content, 
-            reasoning_effort=reasoning_effort,
-            progress_callback=progress_callback
-        )
-        
-        duration = time.time() - start_time
-        
-        # Add result attributes to span
-        if isinstance(results, dict) and "total_score" in results:
-            span.set_attribute("evaluation.total_score", results["total_score"])
-        span.set_attribute("evaluation.duration_seconds", duration)
-        
-        logger.info("Evaluation completed in %.2fs", duration)
-        
-        return results, duration
+    start_time = time.time()
+    logger.info("Starting proposal evaluation (effort: %s)...", reasoning_effort)
+    
+    # Always use V2 (multi-agent) for evaluation
+    agent = ScoringAgentV2()
+    
+    # Combine RFP content with global criteria if provided
+    if global_criteria:
+        enhanced_rfp = f"{rfp_content}\n\n## Additional Evaluation Criteria (User Specified)\n\n{global_criteria}"
+    else:
+        enhanced_rfp = rfp_content
+    
+    results = await agent.evaluate(
+        enhanced_rfp, 
+        proposal_content, 
+        reasoning_effort=reasoning_effort,
+        progress_callback=progress_callback
+    )
+    
+    duration = time.time() - start_time
+    logger.info("Evaluation completed in %.2fs", duration)
+    
+    return results, duration
 
 
 def render_sidebar():
@@ -421,6 +384,7 @@ def render_sidebar():
             help="Choose the Azure service for document text extraction."
         )
         if service != st.session_state.extraction_service:
+            logger.info("Extraction service changed to: %s", service.value)
             st.session_state.extraction_service = service
             # Reset content when service changes
             st.session_state.rfp_content = None
@@ -445,6 +409,7 @@ def render_sidebar():
             help="Individual: Each proposal scored separately. Combined: All proposals evaluated together (may require chunking for large documents)."
         )
         if mode != st.session_state.evaluation_mode:
+            logger.info("Evaluation mode changed to: %s", mode)
             st.session_state.evaluation_mode = mode
             st.session_state.evaluation_results = []
             st.session_state.comparison_results = None
@@ -467,6 +432,7 @@ def render_sidebar():
             help="Higher depth = more detailed analysis but longer processing time."
         )
         if effort != st.session_state.reasoning_effort:
+            logger.info("Analysis depth changed to: %s", effort)
             st.session_state.reasoning_effort = effort
             st.session_state.evaluation_results = []
             st.session_state.comparison_results = None
@@ -492,6 +458,7 @@ def render_sidebar():
         
         # Reset button
         if st.button("🔄 Start Over", use_container_width=True):
+            logger.info("User initiated application reset")
             st.session_state.step = 1
             st.session_state.rfp_file = None
             st.session_state.proposal_files = []
@@ -532,6 +499,8 @@ def render_step1():
         
         if rfp_file is not None:
             st.info(f"📎 **{rfp_file.name}** ({rfp_file.size / 1024:.1f} KB)")
+            if st.session_state.rfp_file is None or st.session_state.rfp_file.get('name') != rfp_file.name:
+                logger.info("RFP file uploaded: %s (%.1f KB)", rfp_file.name, rfp_file.size / 1024)
             st.session_state.rfp_file = {
                 "bytes": rfp_file.getvalue(),
                 "name": rfp_file.name
@@ -556,6 +525,14 @@ def render_step1():
             st.info(f"📎 {len(proposal_files)} file(s) selected")
             for f in proposal_files:
                 st.caption(f"• {f.name} ({f.size / 1024:.1f} KB)")
+            
+            # Log new uploads
+            current_names = {p.get('name') for p in st.session_state.proposal_files} if st.session_state.proposal_files else set()
+            new_names = {f.name for f in proposal_files}
+            if current_names != new_names:
+                logger.info("Proposal files uploaded: %d files - %s", 
+                           len(proposal_files), 
+                           ", ".join(f.name for f in proposal_files))
             
             st.session_state.proposal_files = [
                 {"bytes": f.getvalue(), "name": f.name}
@@ -587,6 +564,9 @@ def render_step1():
     
     if can_proceed:
         if st.button("Continue to Step 2: Extract Content →", type="primary", use_container_width=True):
+            logger.info("User proceeding to Step 2 - RFP: %s, Proposals: %d", 
+                       st.session_state.rfp_file['name'], 
+                       len(st.session_state.proposal_files))
             st.session_state.step = 2
             st.rerun()
     else:
@@ -659,16 +639,19 @@ def render_step2():
                 st.markdown("---")
         
         if st.button("Continue to Step 3: Evaluate →", type="primary", use_container_width=True):
+            logger.info("User proceeding to Step 3 - Evaluation")
             st.session_state.step = 3
             st.rerun()
     else:
         # Run extraction
         if st.button("🔍 Extract Document Content", type="primary", use_container_width=True):
+            logger.info("User starting document extraction")
             run_extraction_pipeline()
     
     # Navigation
     st.markdown("---")
     if st.button("⬅️ Back to Step 1"):
+        logger.info("User navigating back to Step 1")
         st.session_state.step = 1
         st.rerun()
 
@@ -685,23 +668,36 @@ def run_extraction_pipeline():
     # Create extraction queue
     extraction_queue = ProcessingQueue(name="Document Extraction")
     
-    # Add RFP to queue
+    # Add RFP to queue with unique request ID
     rfp_file = st.session_state.rfp_file
+    rfp_request_id = str(uuid.uuid4())[:8]
     extraction_queue.add_item(
         id="rfp",
         name=rfp_file['name'],
         item_type="rfp",
-        metadata={"filename": rfp_file["name"], "size": len(rfp_file["bytes"])}
+        metadata={
+            "filename": rfp_file["name"], 
+            "size": len(rfp_file["bytes"]),
+            "request_id": rfp_request_id
+        }
     )
+    logger.info("Queued RFP for extraction: %s (request_id: %s)", rfp_file['name'], rfp_request_id)
     
-    # Add proposals to queue
+    # Add proposals to queue with unique request IDs
     for i, proposal_file in enumerate(st.session_state.proposal_files):
+        proposal_request_id = str(uuid.uuid4())[:8]
         extraction_queue.add_item(
             id=f"proposal_{i}",
             name=proposal_file['name'],
             item_type="proposal",
-            metadata={"filename": proposal_file["name"], "size": len(proposal_file["bytes"])}
+            metadata={
+                "filename": proposal_file["name"], 
+                "size": len(proposal_file["bytes"]),
+                "request_id": proposal_request_id
+            }
         )
+        logger.info("Queued proposal for extraction: %s (request_id: %s)", 
+                   proposal_file['name'], proposal_request_id)
     
     extraction_queue.start()
     st.session_state.extraction_queue = extraction_queue
@@ -865,11 +861,16 @@ def render_step3():
     else:
         # Start evaluation
         if st.button("🎯 Start Evaluation", type="primary", use_container_width=True):
+            logger.info("User starting evaluation - Mode: %s, Effort: %s, Proposals: %d",
+                       st.session_state.evaluation_mode,
+                       st.session_state.reasoning_effort,
+                       len(st.session_state.proposal_files))
             run_evaluation_pipeline()
     
     # Navigation
     st.markdown("---")
     if st.button("⬅️ Back to Step 2"):
+        logger.info("User navigating back to Step 2")
         st.session_state.step = 2
         st.session_state.evaluation_results = []
         st.session_state.comparison_results = None
@@ -894,31 +895,45 @@ def run_evaluation_pipeline():
     proposal_files = st.session_state.proposal_files
     
     if evaluation_mode == "individual":
-        # Add each proposal as a separate queue item
+        # Add each proposal as a separate queue item with unique request ID
         for i, proposal_file in enumerate(proposal_files):
+            request_id = str(uuid.uuid4())[:8]  # Short unique ID
             scoring_queue.add_item(
                 id=f"proposal_{i}",
                 name=proposal_file['name'],
                 item_type="evaluation",
-                metadata={"filename": proposal_file["name"]}
+                metadata={
+                    "filename": proposal_file["name"],
+                    "request_id": request_id
+                }
             )
+            logger.info("Queued proposal for scoring: %s (request_id: %s)", 
+                       proposal_file['name'], request_id)
     else:
-        # Combined mode - single item for all
+        # Combined mode - single item for all with unique request ID
+        request_id = str(uuid.uuid4())[:8]
         scoring_queue.add_item(
             id="combined",
             name=f"Combined Evaluation ({len(proposal_files)} proposals)",
             item_type="combined_evaluation",
-            metadata={"proposal_count": len(proposal_files)}
+            metadata={
+                "proposal_count": len(proposal_files),
+                "request_id": request_id
+            }
         )
+        logger.info("Queued combined evaluation for %d proposals (request_id: %s)", 
+                   len(proposal_files), request_id)
     
     # Add comparison step if multiple proposals in individual mode
     if len(proposal_files) > 1 and evaluation_mode == "individual":
+        comparison_request_id = str(uuid.uuid4())[:8]
         scoring_queue.add_item(
             id="comparison",
             name="Vendor Comparison",
             item_type="comparison",
-            metadata={}
+            metadata={"request_id": comparison_request_id}
         )
+        logger.info("Queued vendor comparison (request_id: %s)", comparison_request_id)
     
     scoring_queue.start()
     st.session_state.scoring_queue = scoring_queue

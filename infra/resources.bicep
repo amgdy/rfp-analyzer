@@ -78,6 +78,7 @@ module monitoring 'br/public:avm/ptn/azd/monitoring:0.2.1' = {
     applicationInsightsDashboardName: '${abbrs.portalDashboards}${resourceToken}'
     location: location
     tags: tags
+    enableTelemetry: true
   }
 }
 

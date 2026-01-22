@@ -8,7 +8,6 @@ This module implements a multi-agent system for RFP evaluation:
 
 import os
 import json
-import logging
 import time
 from datetime import datetime
 from typing import Callable, Optional
@@ -18,15 +17,12 @@ from azure.identity import DefaultAzureCredential
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
+from .logging_config import get_logger
+
 load_dotenv()
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s.%(msecs)03d | %(levelname)s | %(name)s | %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-)
-logger = logging.getLogger(__name__)
+# Get logger from centralized config
+logger = get_logger(__name__)
 
 
 # ============================================================================

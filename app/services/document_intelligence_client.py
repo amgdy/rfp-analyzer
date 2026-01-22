@@ -8,7 +8,6 @@ that extracts markdown content including text, tables, images, and charts.
 import asyncio
 import base64
 import os
-import logging
 import time
 from typing import Optional, Dict, List, Tuple
 
@@ -23,15 +22,12 @@ from azure.core.credentials import AzureKeyCredential
 from azure.identity import DefaultAzureCredential
 from dotenv import load_dotenv
 
+from .logging_config import get_logger
+
 load_dotenv()
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s.%(msecs)03d | %(levelname)s | %(name)s | %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-)
-logger = logging.getLogger(__name__)
+# Get logger from centralized config
+logger = get_logger(__name__)
 
 
 class AzureDocumentIntelligenceClient:

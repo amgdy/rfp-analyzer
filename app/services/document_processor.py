@@ -9,7 +9,6 @@ Both services convert various document formats to markdown.
 """
 
 import os
-import logging
 import time
 import uuid
 from datetime import datetime
@@ -20,16 +19,12 @@ from dotenv import load_dotenv
 
 from .content_understanding_client import AzureContentUnderstandingClient
 from .document_intelligence_client import AzureDocumentIntelligenceClient
+from .logging_config import get_logger
 
 load_dotenv()
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s.%(msecs)03d | %(levelname)s | %(name)s | %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-)
-logger = logging.getLogger(__name__)
+# Get logger from centralized config
+logger = get_logger(__name__)
 
 
 class ExtractionService(str, Enum):

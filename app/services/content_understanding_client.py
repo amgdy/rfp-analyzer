@@ -1,6 +1,5 @@
 import base64
 import json
-import logging
 import os
 import requests
 import time
@@ -18,6 +17,8 @@ from azure.storage.blob import (
     ContainerSasPermissions
 )
 from azure.storage.blob.aio import ContainerClient
+
+from .logging_config import get_logger
 
 
 POLL_TIMEOUT_SECONDS = 1200  # 20 minutes
@@ -91,7 +92,7 @@ class AzureContentUnderstandingClient:
 
         self._endpoint = endpoint.rstrip("/")
         self._api_version = api_version
-        self._logger = logging.getLogger(__name__)
+        self._logger = get_logger(__name__)
 
         token = token_provider() if token_provider else None
 
