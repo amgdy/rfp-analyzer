@@ -213,6 +213,9 @@ module rfpAnalyzer 'br/public:avm/res/app/container-app:0.20.0' = {
   params: {
     name: 'rfp-analyzer'
     ingressTargetPort: 8501
+    ingressExternal: true
+    // Allow larger file uploads (default is often 100MB, set to 200MB for RFP documents)
+    maxInactiveRevisions: 5
     scaleSettings: {
       minReplicas: 1
       maxReplicas: 10

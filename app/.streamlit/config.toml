@@ -1,0 +1,14 @@
+[server]
+# Maximum size of file uploads (in MB)
+maxUploadSize = 200
+
+# Maximum size of message that can be sent via websocket (in MB)
+maxMessageSize = 200
+
+# Enable CORS for container environments
+enableCORS = false
+enableXsrfProtection = false
+
+[browser]
+# Disable file watcher in production
+gatherUsageStats = false
