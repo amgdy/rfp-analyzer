@@ -193,7 +193,7 @@ st.set_page_config(
 
 # Initialize session state
 if "step" not in st.session_state:
-    st.session_state.step = 1
+    st.session_state.step = 0  # Start at landing page
 if "rfp_file" not in st.session_state:
     st.session_state.rfp_file = None
 if "proposal_files" not in st.session_state:
@@ -211,7 +211,7 @@ if "step_durations" not in st.session_state:
 if "extraction_service" not in st.session_state:
     st.session_state.extraction_service = ExtractionService.DOCUMENT_INTELLIGENCE
 if "evaluation_mode" not in st.session_state:
-    st.session_state.evaluation_mode = "individual"  # "individual" or "combined"
+    st.session_state.evaluation_mode = "individual"  # Always use individual mode
 if "global_criteria" not in st.session_state:
     st.session_state.global_criteria = ""
 if "reasoning_effort" not in st.session_state:
@@ -221,6 +221,8 @@ if "extraction_queue" not in st.session_state:
     st.session_state.extraction_queue = None
 if "scoring_queue" not in st.session_state:
     st.session_state.scoring_queue = None
+if "is_processing" not in st.session_state:
+    st.session_state.is_processing = False
 
 
 # Animation CSS for step indicators
@@ -368,115 +370,190 @@ def render_sidebar():
         st.title("📄 RFP Analyzer")
         st.markdown("---")
         
-        # Extraction Service Selection
-        st.subheader("🔧 Document Extraction")
+        # Only show configuration options when not on landing page
+        if st.session_state.step > 0:
+            # Extraction Service Selection
+            st.subheader("🔧 Document Extraction")
+            
+            service_options = {
+                ExtractionService.DOCUMENT_INTELLIGENCE: "Azure Document Intelligence",
+                ExtractionService.CONTENT_UNDERSTANDING: "Azure Content Understanding"
+            }
+            
+            service = st.radio(
+                "Extraction service:",
+                options=list(service_options.keys()),
+                index=0 if st.session_state.extraction_service == ExtractionService.DOCUMENT_INTELLIGENCE else 1,
+                format_func=lambda x: service_options[x],
+                help="Choose the Azure service for document text extraction.",
+                disabled=st.session_state.is_processing
+            )
+            if service != st.session_state.extraction_service:
+                logger.info("Extraction service changed to: %s", service.value)
+                st.session_state.extraction_service = service
+                # Reset content when service changes
+                st.session_state.rfp_content = None
+                st.session_state.proposal_contents = {}
+                st.rerun()
+            
+            st.markdown("")
+            
+            # Analysis Depth Selection
+            st.subheader("🧠 Analysis Depth")
+            depth_options = {
+                "low": "Standard (~5 mins)",
+                "medium": "Thorough (~10 mins)",
+                "high": "Comprehensive (~15 mins)"
+            }
+            effort = st.radio(
+                "Analysis depth:",
+                options=["low", "medium", "high"],
+                index=["low", "medium", "high"].index(st.session_state.reasoning_effort),
+                format_func=lambda x: depth_options[x],
+                help="Higher depth = more detailed analysis but longer processing time.",
+                disabled=st.session_state.is_processing
+            )
+            if effort != st.session_state.reasoning_effort:
+                logger.info("Analysis depth changed to: %s", effort)
+                st.session_state.reasoning_effort = effort
+                st.session_state.evaluation_results = []
+                st.session_state.comparison_results = None
+                st.rerun()
+            
+            st.markdown("---")
+            
+            # Step indicators
+            st.subheader("📍 Progress")
+            steps = [
+                ("1️⃣", "Upload Documents", st.session_state.step >= 1),
+                ("2️⃣", "Configure & Extract", st.session_state.step >= 2),
+                ("3️⃣", "Evaluate & Compare", st.session_state.step >= 3),
+            ]
+            
+            for icon, label, active in steps:
+                if active:
+                    st.success(f"{icon} {label}")
+                else:
+                    st.info(f"{icon} {label}")
+            
+            st.markdown("---")
+            
+            # Reset button
+            if st.button("🔄 Start Over", use_container_width=True, disabled=st.session_state.is_processing):
+                logger.info("User initiated application reset")
+                st.session_state.step = 0
+                st.session_state.rfp_file = None
+                st.session_state.proposal_files = []
+                st.session_state.rfp_content = None
+                st.session_state.proposal_contents = {}
+                st.session_state.evaluation_results = []
+                st.session_state.comparison_results = None
+                st.session_state.global_criteria = ""
+                st.session_state.extraction_service = ExtractionService.DOCUMENT_INTELLIGENCE
+                st.session_state.evaluation_mode = "individual"
+                st.session_state.reasoning_effort = "low"
+                st.session_state.extraction_queue = None
+                st.session_state.scoring_queue = None
+                st.session_state.step_durations = {}
+                st.session_state.is_processing = False
+                st.rerun()
+        else:
+            # Landing page sidebar content
+            st.markdown("### 👋 Welcome!")
+            st.markdown("""            
+            This tool helps you analyze RFP documents and evaluate vendor proposals using AI.
+            
+            **Features:**
+            - 📄 Document extraction
+            - 🎯 AI-powered scoring
+            - 📊 Multi-vendor comparison
+            - 📥 Export reports
+            """)
         
-        service_options = {
-            ExtractionService.DOCUMENT_INTELLIGENCE: "Azure Document Intelligence",
-            ExtractionService.CONTENT_UNDERSTANDING: "Azure Content Understanding"
-        }
-        
-        service = st.radio(
-            "Extraction service:",
-            options=list(service_options.keys()),
-            index=0 if st.session_state.extraction_service == ExtractionService.DOCUMENT_INTELLIGENCE else 1,
-            format_func=lambda x: service_options[x],
-            help="Choose the Azure service for document text extraction."
-        )
-        if service != st.session_state.extraction_service:
-            logger.info("Extraction service changed to: %s", service.value)
-            st.session_state.extraction_service = service
-            # Reset content when service changes
-            st.session_state.rfp_content = None
-            st.session_state.proposal_contents = {}
-            st.rerun()
-        
+        st.markdown("---")
+        st.caption("Powered by Azure AI Services, Microsoft Foundry & Agent Framework")
+
+
+def render_landing_page():
+    """Render the landing page with solution description and start button."""
+    # Center content with columns
+    col1, col2, col3 = st.columns([1, 2, 1])
+    
+    with col2:
+        st.markdown("")
         st.markdown("")
         
-        # Evaluation Mode Selection
-        st.subheader("📊 Evaluation Mode")
-        
-        mode_options = {
-            "individual": "Score Each Individually",
-            "combined": "Score All Together"
-        }
-        
-        mode = st.radio(
-            "Evaluation approach:",
-            options=["individual", "combined"],
-            index=0 if st.session_state.evaluation_mode == "individual" else 1,
-            format_func=lambda x: mode_options[x],
-            help="Individual: Each proposal scored separately. Combined: All proposals evaluated together (may require chunking for large documents)."
-        )
-        if mode != st.session_state.evaluation_mode:
-            logger.info("Evaluation mode changed to: %s", mode)
-            st.session_state.evaluation_mode = mode
-            st.session_state.evaluation_results = []
-            st.session_state.comparison_results = None
-            st.rerun()
-        
-        st.markdown("")
-        
-        # Analysis Depth Selection
-        st.subheader("🧠 Analysis Depth")
-        depth_options = {
-            "low": "Standard (~5 mins)",
-            "medium": "Thorough (~10 mins)",
-            "high": "Comprehensive (~15 mins)"
-        }
-        effort = st.radio(
-            "Analysis depth:",
-            options=["low", "medium", "high"],
-            index=["low", "medium", "high"].index(st.session_state.reasoning_effort),
-            format_func=lambda x: depth_options[x],
-            help="Higher depth = more detailed analysis but longer processing time."
-        )
-        if effort != st.session_state.reasoning_effort:
-            logger.info("Analysis depth changed to: %s", effort)
-            st.session_state.reasoning_effort = effort
-            st.session_state.evaluation_results = []
-            st.session_state.comparison_results = None
-            st.rerun()
+        # Hero section
+        st.markdown("""
+        <div style="text-align: center; padding: 20px 0;">
+            <h1 style="font-size: 3rem; margin-bottom: 0;">📄 RFP Analyzer</h1>
+            <p style="font-size: 1.2rem; color: #666; margin-top: 10px;">AI-Powered RFP Analysis & Vendor Evaluation</p>
+        </div>
+        """, unsafe_allow_html=True)
         
         st.markdown("---")
         
-        # Step indicators
-        st.subheader("📍 Progress")
-        steps = [
-            ("1️⃣", "Upload Documents", st.session_state.step >= 1),
-            ("2️⃣", "Configure & Extract", st.session_state.step >= 2),
-            ("3️⃣", "Evaluate & Compare", st.session_state.step >= 3),
-        ]
+        # Description
+        st.markdown("""
+        ### Transform Your RFP Review Process
         
-        for icon, label, active in steps:
-            if active:
-                st.success(f"{icon} {label}")
-            else:
-                st.info(f"{icon} {label}")
+        RFP Analyzer uses advanced AI to streamline your vendor evaluation process. 
+        Simply upload your RFP document and vendor proposals, and let our multi-agent 
+        system do the heavy lifting.
+        """)
         
+        # Feature cards
+        st.markdown("")
+        feature_col1, feature_col2 = st.columns(2)
+        
+        with feature_col1:
+            st.markdown("""
+            #### 🔍 Smart Extraction
+            Automatically extract text from PDFs, Word documents, and more using Azure AI services.
+            
+            #### 🎯 Intelligent Scoring  
+            AI agents analyze proposals against RFP criteria with detailed justifications.
+            """)
+        
+        with feature_col2:
+            st.markdown("""
+            #### 📊 Comparative Analysis
+            Compare multiple vendors side-by-side with visual dashboards and rankings.
+            
+            #### 📥 Comprehensive Reports
+            Export detailed reports in Word, CSV, or JSON formats.
+            """)
+        
+        st.markdown("")
         st.markdown("---")
         
-        # Reset button
-        if st.button("🔄 Start Over", use_container_width=True):
-            logger.info("User initiated application reset")
+        # How it works
+        st.markdown("""
+        ### How It Works
+        
+        1. **Upload Documents** — Add your RFP and vendor proposals
+        2. **Configure & Extract** — Select settings and extract document content
+        3. **Evaluate & Compare** — AI analyzes and scores each proposal
+        4. **Review & Export** — View results and download reports
+        """)
+        
+        st.markdown("")
+        st.markdown("")
+        
+        # Start button
+        if st.button(
+            "🚀 Start Analysis", 
+            type="primary", 
+            use_container_width=True,
+            disabled=st.session_state.is_processing,
+            help="Click to begin the RFP analysis process"
+        ):
+            logger.info("User started RFP analysis from landing page")
             st.session_state.step = 1
-            st.session_state.rfp_file = None
-            st.session_state.proposal_files = []
-            st.session_state.rfp_content = None
-            st.session_state.proposal_contents = {}
-            st.session_state.evaluation_results = []
-            st.session_state.comparison_results = None
-            st.session_state.global_criteria = ""
-            st.session_state.extraction_service = ExtractionService.DOCUMENT_INTELLIGENCE
-            st.session_state.evaluation_mode = "individual"
-            st.session_state.reasoning_effort = "low"
-            st.session_state.extraction_queue = None
-            st.session_state.scoring_queue = None
-            st.session_state.step_durations = {}
             st.rerun()
         
-        st.markdown("---")
-        st.caption("Powered by Azure AI Services & Microsoft Agent Framework")
+        st.markdown("")
+        st.caption("Tip: Have your RFP document and vendor proposals ready before starting.")
 
 
 def render_step1():
@@ -563,14 +640,19 @@ def render_step1():
     can_proceed = st.session_state.rfp_file is not None and len(st.session_state.proposal_files) > 0
     
     if can_proceed:
-        if st.button("Continue to Step 2: Extract Content →", type="primary", use_container_width=True):
+        if st.button(
+            "Continue to Step 2: Extract Content →", 
+            type="primary", 
+            use_container_width=True,
+            disabled=st.session_state.is_processing
+        ):
             logger.info("User proceeding to Step 2 - RFP: %s, Proposals: %d", 
                        st.session_state.rfp_file['name'], 
                        len(st.session_state.proposal_files))
             st.session_state.step = 2
             st.rerun()
     else:
-        st.warning("⚠️ Please upload an RFP file and at least one vendor proposal to continue.")
+        st.info("📌 Please upload an RFP file and at least one vendor proposal to continue.")
 
 
 def render_step2():
@@ -591,14 +673,11 @@ def render_step2():
     st.markdown("---")
     st.subheader("⚙️ Current Configuration")
     
-    config_col1, config_col2, config_col3 = st.columns(3)
+    config_col1, config_col2 = st.columns(2)
     with config_col1:
         service_name = "Content Understanding" if st.session_state.extraction_service == ExtractionService.CONTENT_UNDERSTANDING else "Document Intelligence"
         st.metric("Extraction Service", service_name)
     with config_col2:
-        mode_name = "Individual" if st.session_state.evaluation_mode == "individual" else "Combined"
-        st.metric("Evaluation Mode", mode_name)
-    with config_col3:
         st.metric("Analysis Depth", st.session_state.reasoning_effort.title())
     
     # Global criteria preview
@@ -638,19 +717,30 @@ def render_step2():
                 st.markdown(content[:1000] + "..." if len(content) > 1000 else content)
                 st.markdown("---")
         
-        if st.button("Continue to Step 3: Evaluate →", type="primary", use_container_width=True):
+        if st.button(
+            "Continue to Step 3: Evaluate →", 
+            type="primary", 
+            use_container_width=True,
+            disabled=st.session_state.is_processing
+        ):
             logger.info("User proceeding to Step 3 - Evaluation")
             st.session_state.step = 3
             st.rerun()
     else:
         # Run extraction
-        if st.button("🔍 Extract Document Content", type="primary", use_container_width=True):
+        if st.button(
+            "🔍 Extract Document Content", 
+            type="primary", 
+            use_container_width=True,
+            disabled=st.session_state.is_processing
+        ):
             logger.info("User starting document extraction")
+            st.session_state.is_processing = True
             run_extraction_pipeline()
     
     # Navigation
     st.markdown("---")
-    if st.button("⬅️ Back to Step 1"):
+    if st.button("⬅️ Back to Step 1", disabled=st.session_state.is_processing):
         logger.info("User navigating back to Step 1")
         st.session_state.step = 1
         st.rerun()
@@ -813,6 +903,7 @@ def run_extraction_pipeline():
         # Show completion message
         st.success(f"✅ **All {total_files} documents extracted in {format_duration(total_duration)}!**")
         
+        st.session_state.is_processing = False
         time.sleep(1)
         st.rerun()
         
@@ -820,13 +911,13 @@ def run_extraction_pipeline():
         logger.error("Extraction pipeline failed: %s", str(e))
         extraction_queue.finish()
         st.session_state.extraction_queue = extraction_queue
+        st.session_state.is_processing = False
         st.error(f"❌ Error during extraction: {str(e)}")
 
 
 def render_step3():
     """Step 3: Evaluate and Compare."""
-    mode_label = "Individual Scoring" if st.session_state.evaluation_mode == "individual" else "Combined Scoring"
-    st.header(f"Step 3: Evaluate & Compare ({mode_label})")
+    st.header("Step 3: Evaluate & Compare")
     st.markdown("Evaluating vendor proposals against RFP requirements and generating comparison.")
     
     # Show files summary
@@ -860,16 +951,21 @@ def render_step3():
         render_comparison_results()
     else:
         # Start evaluation
-        if st.button("🎯 Start Evaluation", type="primary", use_container_width=True):
-            logger.info("User starting evaluation - Mode: %s, Effort: %s, Proposals: %d",
-                       st.session_state.evaluation_mode,
+        if st.button(
+            "🎯 Start Evaluation", 
+            type="primary", 
+            use_container_width=True,
+            disabled=st.session_state.is_processing
+        ):
+            logger.info("User starting evaluation - Mode: individual, Effort: %s, Proposals: %d",
                        st.session_state.reasoning_effort,
                        len(st.session_state.proposal_files))
+            st.session_state.is_processing = True
             run_evaluation_pipeline()
     
     # Navigation
     st.markdown("---")
-    if st.button("⬅️ Back to Step 2"):
+    if st.button("⬅️ Back to Step 2", disabled=st.session_state.is_processing):
         logger.info("User navigating back to Step 2")
         st.session_state.step = 2
         st.session_state.evaluation_results = []
@@ -880,11 +976,9 @@ def render_step3():
 def run_evaluation_pipeline():
     """Run the full multi-vendor evaluation pipeline with parallel processing and clean UI."""
     reasoning_effort = st.session_state.reasoning_effort
-    evaluation_mode = st.session_state.evaluation_mode
     global_criteria = st.session_state.global_criteria
     
-    logger.info("====== EVALUATION PIPELINE STARTED (Mode: %s, Effort: %s) ======", 
-               evaluation_mode, reasoning_effort)
+    logger.info("====== EVALUATION PIPELINE STARTED (Effort: %s) ======", reasoning_effort)
     pipeline_start = time.time()
     
     # Inject animation CSS
@@ -894,38 +988,23 @@ def run_evaluation_pipeline():
     scoring_queue = ProcessingQueue(name="Proposal Scoring")
     proposal_files = st.session_state.proposal_files
     
-    if evaluation_mode == "individual":
-        # Add each proposal as a separate queue item with unique request ID
-        for i, proposal_file in enumerate(proposal_files):
-            request_id = str(uuid.uuid4())[:8]  # Short unique ID
-            scoring_queue.add_item(
-                id=f"proposal_{i}",
-                name=proposal_file['name'],
-                item_type="evaluation",
-                metadata={
-                    "filename": proposal_file["name"],
-                    "request_id": request_id
-                }
-            )
-            logger.info("Queued proposal for scoring: %s (request_id: %s)", 
-                       proposal_file['name'], request_id)
-    else:
-        # Combined mode - single item for all with unique request ID
-        request_id = str(uuid.uuid4())[:8]
+    # Add each proposal as a separate queue item with unique request ID
+    for i, proposal_file in enumerate(proposal_files):
+        request_id = str(uuid.uuid4())[:8]  # Short unique ID
         scoring_queue.add_item(
-            id="combined",
-            name=f"Combined Evaluation ({len(proposal_files)} proposals)",
-            item_type="combined_evaluation",
+            id=f"proposal_{i}",
+            name=proposal_file['name'],
+            item_type="evaluation",
             metadata={
-                "proposal_count": len(proposal_files),
+                "filename": proposal_file["name"],
                 "request_id": request_id
             }
         )
-        logger.info("Queued combined evaluation for %d proposals (request_id: %s)", 
-                   len(proposal_files), request_id)
+        logger.info("Queued proposal for scoring: %s (request_id: %s)", 
+                   proposal_file['name'], request_id)
     
-    # Add comparison step if multiple proposals in individual mode
-    if len(proposal_files) > 1 and evaluation_mode == "individual":
+    # Add comparison step if multiple proposals
+    if len(proposal_files) > 1:
         comparison_request_id = str(uuid.uuid4())[:8]
         scoring_queue.add_item(
             id="comparison",
@@ -979,103 +1058,59 @@ def run_evaluation_pipeline():
     try:
         evaluation_results = []
         
-        if evaluation_mode == "individual":
-            # Mark all proposal items as processing
-            for i in range(len(proposal_files)):
-                item = scoring_queue.get_item(f"proposal_{i}")
-                item.start()
-            
-            render_status()
-            
-            # Define async function for parallel proposal evaluation
-            async def evaluate_all_proposals():
-                tasks = []
-                for i, proposal_file in enumerate(proposal_files):
-                    proposal_name = proposal_file["name"]
-                    proposal_content = st.session_state.proposal_contents.get(proposal_name, "")
-                    
-                    task = evaluate_proposal(
-                        st.session_state.rfp_content,
-                        proposal_content,
-                        global_criteria=global_criteria,
-                        reasoning_effort=reasoning_effort
-                    )
-                    tasks.append(task)
-                return await asyncio.gather(*tasks, return_exceptions=True)
-            
-            # Run parallel evaluation
-            results = asyncio.run(evaluate_all_proposals())
-            
-            # Process results
-            for i, result in enumerate(results):
-                proposal_name = proposal_files[i]["name"]
-                item = scoring_queue.get_item(f"proposal_{i}")
-                
-                if isinstance(result, Exception):
-                    item.fail(str(result))
-                    logger.error("Failed to evaluate %s: %s", proposal_name, str(result))
-                else:
-                    eval_result, duration = result
-                    eval_result["_proposal_file"] = proposal_name
-                    evaluation_results.append(eval_result)
-                    item.complete(result=eval_result)
-                    st.session_state.step_durations[f"eval_{proposal_name}"] = duration
-                    logger.info("Proposal %s evaluated in %.2fs", proposal_name, duration)
-            
-            render_status()
-            
-            # Check for failures using get_failed_items
-            failed_items = scoring_queue.get_failed_items()
-            if failed_items:
-                raise Exception(f"Failed to evaluate {len(failed_items)} proposal(s)")
-            
-        else:
-            # Combined evaluation - score all together
-            item = scoring_queue.get_item("combined")
+        # Mark all proposal items as processing
+        for i in range(len(proposal_files)):
+            item = scoring_queue.get_item(f"proposal_{i}")
             item.start()
-            
-            render_status()
-            
-            # Combine all proposal contents
-            combined_content = ""
-            for proposal_file in proposal_files:
+        
+        render_status()
+        
+        # Define async function for parallel proposal evaluation
+        async def evaluate_all_proposals():
+            tasks = []
+            for i, proposal_file in enumerate(proposal_files):
                 proposal_name = proposal_file["name"]
                 proposal_content = st.session_state.proposal_contents.get(proposal_name, "")
-                combined_content += f"\n\n## Vendor Proposal: {proposal_name}\n\n{proposal_content}"
-            
-            # Check content length
-            estimated_tokens = len(combined_content) // 4
-            max_tokens = 100000
-            
-            if estimated_tokens > max_tokens:
-                logger.warning("Combined content exceeds token limit, chunking required")
-                st.warning(f"⚠️ Combined content is large ({estimated_tokens:,} estimated tokens). Results may be truncated.")
-            
-            try:
-                result, duration = asyncio.run(
-                    evaluate_proposal(
-                        st.session_state.rfp_content,
-                        combined_content,
-                        global_criteria=global_criteria,
-                        reasoning_effort=reasoning_effort
-                    )
+                
+                task = evaluate_proposal(
+                    st.session_state.rfp_content,
+                    proposal_content,
+                    global_criteria=global_criteria,
+                    reasoning_effort=reasoning_effort
                 )
-                
-                result["_proposal_file"] = "Combined Evaluation"
-                evaluation_results.append(result)
-                item.complete(result=result)
-                st.session_state.step_durations["eval_combined"] = duration
-                
-            except Exception as e:
-                item.fail(str(e))
-                raise
+                tasks.append(task)
+            return await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Run parallel evaluation
+        results = asyncio.run(evaluate_all_proposals())
+        
+        # Process results
+        for i, result in enumerate(results):
+            proposal_name = proposal_files[i]["name"]
+            item = scoring_queue.get_item(f"proposal_{i}")
             
-            render_status()
+            if isinstance(result, Exception):
+                item.fail(str(result))
+                logger.error("Failed to evaluate %s: %s", proposal_name, str(result))
+            else:
+                eval_result, duration = result
+                eval_result["_proposal_file"] = proposal_name
+                evaluation_results.append(eval_result)
+                item.complete(result=eval_result)
+                st.session_state.step_durations[f"eval_{proposal_name}"] = duration
+                logger.info("Proposal %s evaluated in %.2fs", proposal_name, duration)
+        
+        render_status()
+        
+        # Check for failures using get_failed_items
+        failed_items = scoring_queue.get_failed_items()
+        if failed_items:
+            raise Exception(f"Failed to evaluate {len(failed_items)} proposal(s)")
         
         st.session_state.evaluation_results = evaluation_results
         
-        # Step 2: Compare results (if multiple proposals in individual mode)
-        if len(evaluation_results) > 1 and evaluation_mode == "individual":
+        # Compare results if multiple proposals
+        if len(evaluation_results) > 1:
             comparison_item = scoring_queue.get_item("comparison")
             comparison_item.start()
             
@@ -1132,6 +1167,7 @@ def run_evaluation_pipeline():
         
         st.success(f"✅ **Evaluation complete in {format_duration(total_duration)}!**")
         
+        st.session_state.is_processing = False
         time.sleep(1)
         st.rerun()
         
@@ -1139,6 +1175,7 @@ def run_evaluation_pipeline():
         logger.error("Evaluation pipeline failed: %s", str(e))
         scoring_queue.finish()
         st.session_state.scoring_queue = scoring_queue
+        st.session_state.is_processing = False
         render_status()
         st.error(f"❌ Error during evaluation: {str(e)}")
 
@@ -2618,7 +2655,9 @@ def main():
     render_sidebar()
     
     # Render current step
-    if st.session_state.step == 1:
+    if st.session_state.step == 0:
+        render_landing_page()
+    elif st.session_state.step == 1:
         render_step1()
     elif st.session_state.step == 2:
         render_step2()
