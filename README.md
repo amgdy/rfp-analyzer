@@ -64,26 +64,25 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed diagrams and compo
 
 ### High-Level Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         RFP Analyzer Application                     │
-├─────────────────────────────────────────────────────────────────────┤
-│  ┌─────────────┐  ┌─────────────────┐  ┌─────────────────────────┐  │
-│  │  Streamlit  │  │    Document     │  │    Multi-Agent          │  │
-│  │     UI      │──│   Processor     │──│    Scoring System       │  │
-│  └─────────────┘  └─────────────────┘  └─────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                         Azure AI Services                            │
-├─────────────────────────────────────────────────────────────────────┤
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────────┐  │
-│  │     Azure       │  │     Azure       │  │     Azure AI        │  │
-│  │    OpenAI       │  │   Document      │  │    Content          │  │
-│  │   (GPT-4.1+)    │  │  Intelligence   │  │   Understanding     │  │
-│  └─────────────────┘  └─────────────────┘  └─────────────────────┘  │
-└─────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph App["🖥️ RFP Analyzer Application"]
+        UI["Streamlit UI"]
+        DP["Document Processor"]
+        MAS["Multi-Agent Scoring System"]
+        UI --> DP --> MAS
+    end
+    
+    subgraph Azure["☁️ Azure AI Services"]
+        AOAI["Azure OpenAI\n(GPT-4.1+)"]
+        ADI["Azure Document\nIntelligence"]
+        ACU["Azure AI Content\nUnderstanding"]
+    end
+    
+    App --> Azure
+    
+    style App fill:#e3f2fd,stroke:#1565c0
+    style Azure fill:#e8f5e9,stroke:#2e7d32
 ```
 
 ### Azure Resources (Deployed via `azd`)
