@@ -341,7 +341,7 @@ For feature requests, include:
 
 If you have questions about contributing, feel free to:
 
-- Open a [GitHub Discussion](https://github.com/your-org/rfp-analyzer/discussions)
+- Open a [GitHub Discussion](https://github.com/amgdy/rfp-analyzer/discussions)
 - Review existing issues and PRs for context
 - Check the [Architecture Documentation](docs/ARCHITECTURE.md)
 

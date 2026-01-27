@@ -36,7 +36,7 @@ Open `http://localhost:8501` in your browser.
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/rfp-analyzer.git
+git clone https://github.com/amgdy/rfp-analyzer.git
 cd rfp-analyzer
 
 # Login to Azure
@@ -134,5 +134,5 @@ AZURE_OPENAI_ENDPOINT environment variable is required
 
 ## Support
 
-- **Issues**: [GitHub Issues](https://github.com/your-org/rfp-analyzer/issues)
+- **Issues**: [GitHub Issues](https://github.com/amgdy/rfp-analyzer/issues)
 - **Documentation**: [docs/](docs/)

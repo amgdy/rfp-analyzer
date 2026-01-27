@@ -17,7 +17,7 @@ We take security seriously. If you discover a security vulnerability within RFP 
 
 ### Do
 
-1. **Email us directly** at [security@your-org.com] with:
+1. **Open a private security advisory** at [GitHub Security](https://github.com/amgdy/rfp-analyzer/security/advisories/new) with:
    - Description of the vulnerability
    - Steps to reproduce
    - Potential impact
@@ -157,4 +157,4 @@ Security updates will be released as patch versions. Subscribe to repository rel
 
 ## Contact
 
-For security concerns, contact: [security@your-org.com]
+For security concerns, open a [private security advisory](https://github.com/amgdy/rfp-analyzer/security/advisories/new)
