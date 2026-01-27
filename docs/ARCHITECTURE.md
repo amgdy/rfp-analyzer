@@ -66,9 +66,9 @@ flowchart TB
 
     subgraph AZURE["☁️ Azure AI Services"]
         direction LR
-        AOA["Azure OpenAI\n(GPT-4.1+)"]
-        ADI["Azure Document\nIntelligence"]
-        ACU["Azure AI Content\nUnderstanding"]
+        AOA["Azure OpenAI<br>(GPT-4.1+)"]
+        ADI["Azure Document<br>Intelligence"]
+        ACU["Azure AI Content<br>Understanding"]
     end
 
     UI --> APP
@@ -100,9 +100,9 @@ flowchart TB
         end
         
         subgraph Steps["Workflow Steps"]
-            S1["Step 1: Upload\n• RFP file\n• Proposals\n• Preview"]
-            S2["Step 2: Extract\n• Service selection\n• Progress\n• Results"]
-            S3["Step 3: Evaluate\n• Criteria extraction\n• Proposal scoring\n• Vendor comparison\n• Export options"]
+            S1["Step 1: Upload<br>• RFP file<br>• Proposals<br>• Preview"]
+            S2["Step 2: Extract<br>• Service selection<br>• Progress<br>• Results"]
+            S3["Step 3: Evaluate<br>• Criteria extraction<br>• Proposal scoring<br>• Vendor comparison<br>• Export options"]
         end
         
         SSM --> Steps
@@ -125,14 +125,14 @@ flowchart TB
         end
         
         subgraph Clients["Client Layer"]
-            CUC["Content Understanding Client\n• Analyzer API\n• Multi-modal\n• Markdown output"]
-            DIC["Document Intelligence Client\n• Layout model\n• Pre-built models\n• Markdown output"]
+            CUC["Content Understanding Client<br>• Analyzer API<br>• Multi-modal<br>• Markdown output"]
+            DIC["Document Intelligence Client<br>• Layout model<br>• Pre-built models<br>• Markdown output"]
         end
         
         CUS --> CUC
         DIS --> DIC
         
-        Formats["📄 Supported Formats:\nPDF, DOCX, PNG, JPG, JPEG, BMP, TIFF"]
+        Formats["📄 Supported Formats:<br>PDF, DOCX, PNG, JPG, JPEG, BMP, TIFF"]
     end
     
     style DocProcessor fill:#e3f2fd,stroke:#1565c0
@@ -147,13 +147,13 @@ flowchart TB
     subgraph ScoringSystem["Scoring Agent V2 System"]
         subgraph Agent1["Criteria Extraction Agent"]
             I1["Input: RFP Document (Markdown)"]
-            O1["Output: ExtractedCriteria\n• rfp_title\n• rfp_summary\n• criteria[] with weights\n• evaluation_guidance"]
+            O1["Output: ExtractedCriteria<br>• rfp_title<br>• rfp_summary<br>• criteria[] with weights<br>• evaluation_guidance"]
             I1 --> O1
         end
         
         subgraph Agent2["Proposal Scoring Agent"]
             I2["Input: Proposal + ExtractedCriteria"]
-            O2["Output: ProposalEvaluationV2\n• total_score\n• criterion_scores[]\n• strengths / weaknesses\n• recommendation"]
+            O2["Output: ProposalEvaluationV2<br>• total_score<br>• criterion_scores[]<br>• strengths / weaknesses<br>• recommendation"]
             I2 --> O2
         end
         
@@ -223,23 +223,23 @@ flowchart TB
     end
     
     subgraph Agent1["🔍 AGENT 1: Criteria Extraction"]
-        A1D["• Analyzes RFP requirements\n• Identifies evaluation criteria\n• Assigns weights (total = 100%)\n• Provides scoring guidance"]
-        A1M["Model: Azure OpenAI (GPT-4.1+)"]
+        A1D["• Analyzes RFP requirements<br>• Identifies evaluation criteria<br>• Assigns weights total = 100%<br>• Provides scoring guidance"]
+        A1M["Model: Azure OpenAI GPT-4.1+"]
         A1O["Output: ExtractedCriteria"]
     end
     
-    EC["📋 Extracted Criteria\n(JSON/Pydantic)"]
+    EC["📋 Extracted Criteria<br>JSON/Pydantic"]
     
-    subgraph Agent2["📊 AGENT 2: Proposal Scoring (Parallel)"]
+    subgraph Agent2["📊 AGENT 2: Proposal Scoring - Parallel"]
         direction LR
-        A2A["Scoring Agent\n(Vendor A)\n• Evaluates proposal\n• Scores per criterion\n• Provides evidence"]
-        A2B["Scoring Agent\n(Vendor B)\n• Evaluates proposal\n• Scores per criterion\n• Provides evidence"]
-        A2N["Scoring Agent\n(Vendor N)\n• Evaluates proposal\n• Scores per criterion\n• Provides evidence"]
+        A2A["Scoring Agent<br>Vendor A<br>• Evaluates proposal<br>• Scores per criterion<br>• Provides evidence"]
+        A2B["Scoring Agent<br>Vendor B<br>• Evaluates proposal<br>• Scores per criterion<br>• Provides evidence"]
+        A2N["Scoring Agent<br>Vendor N<br>• Evaluates proposal<br>• Scores per criterion<br>• Provides evidence"]
     end
     
     subgraph Agent3["🏆 AGENT 3: Comparison"]
-        A3D["• Ranks all vendors by score\n• Compares criterion performance\n• Identifies best/worst performers\n• Generates recommendations\n• Assesses comparative risks"]
-        A3M["Model: Azure OpenAI (GPT-4.1+)"]
+        A3D["• Ranks all vendors by score<br>• Compares criterion performance<br>• Identifies best/worst performers<br>• Generates recommendations<br>• Assesses comparative risks"]
+        A3M["Model: Azure OpenAI GPT-4.1+"]
         A3O["Output: ComparisonResult"]
     end
     
@@ -295,40 +295,40 @@ flowchart TB
 flowchart TB
     subgraph Subscription["☁️ Azure Subscription"]
         subgraph RG["📁 Resource Group: rg-{env-name}"]
-            subgraph AIFoundry["🧠 Azure AI Foundry Account (AIServices)"]
+            subgraph AIFoundry["🧠 Azure AI Foundry Account - AIServices"]
                 direction TB
-                Capabilities["Capabilities:\n• OpenAI Language Model API\n• Form Recognizer\n• Content Understanding"]
+                Capabilities["Capabilities:<br>• OpenAI Language Model API<br>• Form Recognizer<br>• Content Understanding"]
                 
                 subgraph Models["Model Deployments"]
-                    GPT52["gpt-5.2\nGlobalStd\n100K TPM"]
-                    GPT41["gpt-4.1\nGlobalStd\n100K TPM"]
-                    GPT41M["gpt-4.1-mini\nGlobalStd\n100K TPM"]
-                    EMB["text-embedding-3-large\nGlobalStd\n300K TPM"]
+                    GPT52["gpt-5.2<br>GlobalStd<br>100K TPM"]
+                    GPT41["gpt-4.1<br>GlobalStd<br>100K TPM"]
+                    GPT41M["gpt-4.1-mini<br>GlobalStd<br>100K TPM"]
+                    EMB["text-embedding-3-large<br>GlobalStd<br>300K TPM"]
                 end
                 
                 subgraph Project["AI Foundry Project"]
-                    AppInsConn["App Insights Connection\n(Telemetry integration)"]
+                    AppInsConn["App Insights Connection<br>Telemetry integration"]
                 end
             end
             
             subgraph Monitoring["📊 Monitoring Stack"]
-                LAW["Log Analytics\nWorkspace\n• Container logs\n• AI service logs\n• Custom metrics"]
-                AI["Application Insights\n• Performance metrics\n• Request tracing\n• Exception tracking\n• Custom events"]
+                LAW["Log Analytics<br>Workspace<br>• Container logs<br>• AI service logs<br>• Custom metrics"]
+                AI["Application Insights<br>• Performance metrics<br>• Request tracing<br>• Exception tracking<br>• Custom events"]
                 Dashboard["Application Insights Dashboard"]
                 AI --> LAW
             end
             
             subgraph Container["🐳 Container Platform"]
-                ACR["Container Registry\n• rfp-analyzer image\n• SKU: Standard"]
+                ACR["Container Registry<br>• rfp-analyzer image<br>• SKU: Standard"]
                 
                 subgraph CAE["Container Apps Environment"]
-                    CA["rfp-analyzer\nContainer App\n• Port: 8501\n• CPU: 2 cores\n• Memory: 4Gi\n• Scale: 1-10"]
+                    CA["rfp-analyzer<br>Container App<br>• Port: 8501<br>• CPU: 2 cores<br>• Memory: 4Gi<br>• Scale: 1-10"]
                 end
                 
                 ACR --> CA
             end
             
-            MI["🔐 User-Assigned Managed Identity\n• Azure AI Developer\n• Cognitive Services User\n• AcrPull"]
+            MI["🔐 User-Assigned Managed Identity<br>• Azure AI Developer<br>• Cognitive Services User<br>• AcrPull"]
         end
     end
     
@@ -347,7 +347,7 @@ flowchart TB
 ```mermaid
 flowchart TB
     subgraph Infra["📁 infra/"]
-        Main["main.bicep\n(subscription scope)"]
+        Main["main.bicep<br>subscription scope"]
         Params["main.parameters.json"]
         Resources["resources.bicep"]
         Abbr["abbreviations.json"]
@@ -369,21 +369,21 @@ flowchart TB
 
 ```mermaid
 flowchart TB
-    Main["main.bicep\n(subscription scope)"]
+    Main["main.bicep<br>subscription scope"]
     
-    Main --> RG["rfpResourceGroup\n(AVM module)"]
+    Main --> RG["rfpResourceGroup<br>AVM module"]
     
-    RG --> Resources["resources.bicep\n(resource group scope)"]
+    RG --> Resources["resources.bicep<br>resource group scope"]
     
-    Resources --> Monitoring["monitoring\n(AVM pattern)"]
-    Resources --> Identity["rfpAnalyzerIdentity\n(AVM module)"]
-    Resources --> Foundry["foundryAccount\n(AVM module)"]
-    Resources --> Project["foundryProject\n(native resource)"]
-    Resources --> Registry["containerRegistry\n(AVM module)"]
-    Resources --> CAEnv["containerAppsEnvironment\n(AVM module)"]
-    Resources --> FetchImg["rfpAnalyzerFetchLatestImage\n(custom module)"]
-    Resources --> ContainerApp["rfpAnalyzer\n(AVM module)"]
-    Resources --> Roles["Role Assignments\n(AVM modules)"]
+    Resources --> Monitoring["monitoring<br>AVM pattern"]
+    Resources --> Identity["rfpAnalyzerIdentity<br>AVM module"]
+    Resources --> Foundry["foundryAccount<br>AVM module"]
+    Resources --> Project["foundryProject<br>native resource"]
+    Resources --> Registry["containerRegistry<br>AVM module"]
+    Resources --> CAEnv["containerAppsEnvironment<br>AVM module"]
+    Resources --> FetchImg["rfpAnalyzerFetchLatestImage<br>custom module"]
+    Resources --> ContainerApp["rfpAnalyzer<br>AVM module"]
+    Resources --> Roles["Role Assignments<br>AVM modules"]
     
     Monitoring --> LAW["Log Analytics Workspace"]
     Monitoring --> AppIns["Application Insights"]
@@ -423,9 +423,9 @@ flowchart TB
     Upload["👤 User uploads document(s)"]
     
     subgraph DocProc["Document Processor"]
-        V["1. Validate file type\n(PDF, DOCX, PNG, JPG, etc.)"]
+        V["1. Validate file type<br>PDF, DOCX, PNG, JPG, etc."]
         R["2. Read file bytes into memory"]
-        S["3. Select extraction service\nbased on user choice"]
+        S["3. Select extraction service<br>based on user choice"]
     end
     
     Upload --> DocProc
@@ -473,22 +473,22 @@ flowchart TB
     RFP --> CEA
     
     subgraph CEA["Criteria Extraction Agent"]
-        CEA1["Azure OpenAI Call\n(structured output)"]
+        CEA1["Azure OpenAI Call<br>structured output"]
     end
     
-    CEA --> EC["ExtractedCriteria\n(Pydantic model)"]
+    CEA --> EC["ExtractedCriteria<br>Pydantic model"]
     
     EC --> SA1 & SAN
     P1 --> SA1
     PN --> SAN
     
     subgraph Scoring["Parallel Scoring"]
-        SA1["Scoring Agent\n(Proposal 1)\nAzure OpenAI"]
-        SAN["Scoring Agent\n(Proposal N)\nAzure OpenAI"]
+        SA1["Scoring Agent<br>Proposal 1<br>Azure OpenAI"]
+        SAN["Scoring Agent<br>Proposal N<br>Azure OpenAI"]
     end
     
-    SA1 --> EV1["Evaluation V2\n(Vendor 1)"]
-    SAN --> EVN["Evaluation V2\n(Vendor N)"]
+    SA1 --> EV1["Evaluation V2<br>Vendor 1"]
+    SAN --> EVN["Evaluation V2<br>Vendor N"]
     
     EV1 & EVN --> CA
     
@@ -523,9 +523,9 @@ flowchart TB
         direction TB
         Chain["Credential Chain (tried in order):"]
         
-        C1["1. EnvironmentCredential\n└─ AZURE_CLIENT_ID, AZURE_TENANT_ID,\n   AZURE_CLIENT_SECRET (Service Principal)"]
-        C2["2. ManagedIdentityCredential ◀️ Used in Azure\n└─ User-Assigned Managed Identity\n   (AZURE_CLIENT_ID env var)"]
-        C3["3. AzureCliCredential ◀️ Used in local dev\n└─ 'az login' session"]
+        C1["1. EnvironmentCredential<br>AZURE_CLIENT_ID, AZURE_TENANT_ID,<br>AZURE_CLIENT_SECRET"]
+        C2["2. ManagedIdentityCredential ◀️ Used in Azure<br>User-Assigned Managed Identity<br>AZURE_CLIENT_ID env var"]
+        C3["3. AzureCliCredential ◀️ Used in local dev<br>az login session"]
         C4["4. AzurePowerShellCredential"]
         C5["5. VisualStudioCodeCredential"]
         
@@ -536,7 +536,7 @@ flowchart TB
     
     subgraph Token["Token Acquisition"]
         T1["Scope: https://cognitiveservices.azure.com/.default"]
-        T2["Token used for:\n• Azure OpenAI API calls\n• Content Understanding API calls\n• Document Intelligence API calls"]
+        T2["Token used for:<br>• Azure OpenAI API calls<br>• Content Understanding API calls<br>• Document Intelligence API calls"]
     end
     
     style DAC fill:#e3f2fd,stroke:#1565c0
@@ -547,14 +547,14 @@ flowchart TB
 
 ```mermaid
 flowchart TB
-    MI["🔐 User-Assigned Managed Identity\n(rfp-analyzer-identity)"]
+    MI["🔐 User-Assigned Managed Identity<br>rfp-analyzer-identity"]
     
     MI --> R1 & R2 & R3
     
     subgraph Roles["Role Assignments"]
-        R1["Azure AI Developer\n\nScope: Resource Group\n\nAllows:\n• Create/manage AI resources\n• Deploy models"]
-        R2["Cognitive Services User\n\nScope: Resource Group\n\nAllows:\n• Use AI services\n• Make API calls"]
-        R3["AcrPull\n\nScope: Container Registry\n\nAllows:\n• Pull images"]
+        R1["Azure AI Developer<br><br>Scope: Resource Group<br><br>Allows:<br>• Create/manage AI resources<br>• Deploy models"]
+        R2["Cognitive Services User<br><br>Scope: Resource Group<br><br>Allows:<br>• Use AI services<br>• Make API calls"]
+        R3["AcrPull<br><br>Scope: Container Registry<br><br>Allows:<br>• Pull images"]
     end
     
     subgraph Security["🛡️ Security Features"]
@@ -580,16 +580,16 @@ flowchart TB
 flowchart TB
     subgraph AZD["azd up Workflow"]
         S1["Step 1: Initialize"]
-        S1D["azd init\n• Creates .azure/ directory\n• Selects subscription and location\n• Creates environment configuration"]
+        S1D["azd init<br>• Creates .azure/ directory<br>• Selects subscription and location<br>• Creates environment configuration"]
         
         S2["Step 2: Provision Infrastructure"]
-        S2D["azd provision\n• Deploys main.bicep at subscription scope\n• Creates resource group\n• Provisions all Azure resources\n• Configures role assignments\n• Runs postprovision hooks"]
+        S2D["azd provision<br>• Deploys main.bicep at subscription scope<br>• Creates resource group<br>• Provisions all Azure resources<br>• Configures role assignments<br>• Runs postprovision hooks"]
         
         S3["Step 3: Build & Deploy Application"]
-        S3D["azd deploy\n• Builds Docker image (remote build)\n• Pushes to Azure Container Registry\n• Updates Container App with new image"]
+        S3D["azd deploy<br>• Builds Docker image remote build<br>• Pushes to Azure Container Registry<br>• Updates Container App with new image"]
         
         S4["Step 4: Output"]
-        S4D["Environment variables and URLs\n• Application URL\n• Azure OpenAI endpoint\n• Content Understanding endpoint\n• Document Intelligence endpoint"]
+        S4D["Environment variables and URLs<br>• Application URL<br>• Azure OpenAI endpoint<br>• Content Understanding endpoint<br>• Document Intelligence endpoint"]
         
         S1 --> S1D --> S2 --> S2D --> S3 --> S3D --> S4 --> S4D
     end
@@ -601,7 +601,7 @@ flowchart TB
 
 ```mermaid
 flowchart TB
-    Source["📁 Source Code\n(app/)"]
+    Source["📁 Source Code<br>app/"]
     
     subgraph Docker["Dockerfile"]
         D1["FROM python:3.13-slim"]
@@ -648,9 +648,9 @@ flowchart TB
 ```mermaid
 flowchart TB
     subgraph AppLayer["Application Layer"]
-        L["📝 Logging\n(Python)"]
-        M["📊 Metrics\n(Custom)"]
-        T["🔍 Tracing\n(OpenTelemetry)"]
+        L["📝 Logging<br>Python"]
+        M["📊 Metrics<br>Custom"]
+        T["🔍 Tracing<br>OpenTelemetry"]
     end
     
     AppLayer --> SDK

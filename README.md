@@ -74,9 +74,9 @@ flowchart TB
     end
     
     subgraph Azure["☁️ Azure AI Services"]
-        AOAI["Azure OpenAI\n(GPT-4.1+)"]
-        ADI["Azure Document\nIntelligence"]
-        ACU["Azure AI Content\nUnderstanding"]
+        AOAI["Azure OpenAI<br>GPT-4.1+"]
+        ADI["Azure Document<br>Intelligence"]
+        ACU["Azure AI Content<br>Understanding"]
     end
     
     App --> Azure
