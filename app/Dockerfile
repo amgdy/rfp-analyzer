@@ -6,7 +6,7 @@
 # -----------------------------------------------------------------------------
 # Stage 1: Build stage
 # -----------------------------------------------------------------------------
-FROM mcr.microsoft.com/dotnet/sdk:10.0-preview AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 
 WORKDIR /src
 
@@ -22,12 +22,12 @@ RUN dotnet restore RfpAnalyzer/RfpAnalyzer.csproj
 COPY RfpAnalyzer/ ./RfpAnalyzer/
 
 # Build and publish
-RUN dotnet publish RfpAnalyzer/RfpAnalyzer.csproj -c Release -o /app/publish --no-restore
+RUN dotnet publish RfpAnalyzer/RfpAnalyzer.csproj -c Release -o /app/publish
 
 # -----------------------------------------------------------------------------
 # Stage 2: Runtime stage
 # -----------------------------------------------------------------------------
-FROM mcr.microsoft.com/dotnet/aspnet:10.0-preview AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 
 # Create non-root user for security
 RUN useradd --create-home --shell /bin/bash appuser
