@@ -1,21 +1,21 @@
 # RFP Analyzer
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
+[![.NET 10](https://img.shields.io/badge/.NET-10-512BD4.svg)](https://dotnet.microsoft.com/)
 [![Azure](https://img.shields.io/badge/Azure-Powered-0078D4.svg)](https://azure.microsoft.com)
 
-An AI-powered application for analyzing Request for Proposals (RFPs) and scoring vendor proposals using Azure AI services and a multi-agent architecture.
+An AI-powered application for analyzing Request for Proposals (RFPs) and scoring vendor proposals using Azure AI services. Built with .NET 10 Blazor and MudBlazor.
 
 ## 🎯 Overview
 
-RFP Analyzer automates the complex process of evaluating vendor proposals against RFP requirements. It leverages Azure AI services to extract document content, analyze evaluation criteria, and score proposals using a sophisticated multi-agent system.
+RFP Analyzer automates the complex process of evaluating vendor proposals against RFP requirements. It leverages Azure AI services to extract document content, analyze evaluation criteria, and score proposals using specialized services.
 
 ### Key Capabilities
 
 - **Automated Document Processing**: Extract content from PDFs, Word documents, and images using Azure AI
 - **Intelligent Criteria Extraction**: Automatically identify evaluation criteria and weights from RFP documents
 - **Multi-Vendor Comparison**: Evaluate and rank multiple vendor proposals simultaneously
-- **Comprehensive Reporting**: Generate detailed reports in Word, CSV, and JSON formats
+- **Comprehensive Reporting**: Generate detailed reports in Excel, CSV, and JSON formats
 
 ## ✨ Features
 
@@ -41,22 +41,19 @@ RFP Analyzer automates the complex process of evaluating vendor proposals agains
 | **Azure Content Understanding** | Complex documents, mixed content | Multi-modal analysis, layout understanding |
 | **Azure Document Intelligence** | Structured documents, forms | High accuracy OCR, pre-built models |
 
-### Multi-Agent Architecture
+### Scoring & Comparison Services
 
-The evaluation system uses specialized AI agents:
-
-| Agent | Responsibility |
-|-------|----------------|
-| **Criteria Extraction Agent** | Analyzes RFP to identify scoring criteria, weights, and evaluation guidance |
-| **Proposal Scoring Agent** | Evaluates each vendor proposal against extracted criteria |
-| **Comparison Agent** | Compares vendors, generates rankings, and provides recommendations |
+| Service | Responsibility |
+|---------|----------------|
+| **ScoringService** | Analyzes RFP to extract criteria and scores each vendor proposal |
+| **ComparisonService** | Compares vendors, generates rankings, and provides recommendations |
 
 ### Export Options
 
 - 📊 **CSV Reports**: Comparison matrices with all metrics
-- 📄 **Word Documents**: Detailed evaluation reports per vendor
+- 📗 **Excel Documents**: Detailed evaluation reports per vendor
 - 📋 **JSON Data**: Structured data for further processing
-- 📈 **Interactive Charts**: Visual score comparisons (requires Plotly)
+- 📈 **Interactive Charts**: Visual score comparisons via Plotly.Blazor
 
 ## 🏗️ Architecture
 
@@ -67,10 +64,10 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed diagrams and compo
 ```mermaid
 flowchart TB
     subgraph App["🖥️ RFP Analyzer Application"]
-        UI["Streamlit UI"]
-        DP["Document Processor"]
-        MAS["Multi-Agent Scoring System"]
-        UI --> DP --> MAS
+        UI["Blazor / MudBlazor UI"]
+        DP["Document Processor Service"]
+        SS["Scoring & Comparison Services"]
+        UI --> DP --> SS
     end
     
     subgraph Azure["☁️ Azure AI Services"]
@@ -90,7 +87,7 @@ flowchart TB
 | Resource | Purpose |
 |----------|---------|
 | **Azure AI Foundry Account** | Hosts AI services (OpenAI, Content Understanding, Document Intelligence) |
-| **Azure Container Apps** | Runs the Streamlit application |
+| **Azure Container Apps** | Runs the Blazor application |
 | **Azure Container Registry** | Stores application container images |
 | **Log Analytics Workspace** | Centralized logging and monitoring |
 | **Application Insights** | Application performance monitoring |
@@ -100,8 +97,7 @@ flowchart TB
 
 ### Prerequisites
 
-- **Python 3.13+** - [Download](https://www.python.org/downloads/)
-- **UV Package Manager** - [Install UV](https://docs.astral.sh/uv/getting-started/installation/)
+- **.NET 10 SDK** - [Download](https://dotnet.microsoft.com/download/dotnet/10.0)
 - **Azure CLI** - [Install Azure CLI](https://docs.microsoft.com/cli/azure/install-azure-cli)
 - **Azure Developer CLI (azd)** - [Install azd](https://learn.microsoft.com/azure/developer/azure-developer-cli/install-azd)
 - **Docker** (optional) - For containerized deployment
@@ -121,29 +117,24 @@ Your Azure subscription needs:
    cd rfp-analyzer
    ```
 
-2. **Install dependencies**
-   ```bash
-   cd app
-   uv sync
-   ```
-
-3. **Configure environment**
-   ```bash
-   cp .env.example .env
-   # Edit .env with your Azure credentials
-   ```
-
-4. **Authenticate with Azure**
+2. **Authenticate with Azure**
    ```bash
    az login
    ```
 
-5. **Run the application**
+3. **Configure app settings**
    ```bash
-   uv run streamlit run main.py
+   # Edit EfpAnalyzer/EfpAnalyzer/appsettings.Development.json with your Azure endpoints
    ```
 
-6. **Open your browser** at `http://localhost:8501`
+4. **Build and run**
+   ```bash
+   cd EfpAnalyzer
+   dotnet build
+   dotnet run --project EfpAnalyzer
+   ```
+
+5. **Open your browser** at `https://localhost:5001` (or the URL shown in the console)
 
 ## ☁️ Azure Deployment
 
@@ -204,46 +195,29 @@ The following environment variables are configured automatically during Azure de
 
 ### Manual Configuration (Local Development)
 
-For local development, create a `.env` file in the `app` directory:
+For local development, edit `EfpAnalyzer/EfpAnalyzer/appsettings.Development.json`:
 
-```env
-# Required
-AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
-AZURE_OPENAI_DEPLOYMENT_NAME=gpt-4o-mini
-
-# Choose one extraction service
-AZURE_CONTENT_UNDERSTANDING_ENDPOINT=https://your-ai-foundry.services.ai.azure.com/
-# OR
-AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT=https://your-doc-intel.cognitiveservices.azure.com/
-
-# Optional: Enable OpenTelemetry logging
-OTEL_LOGGING_ENABLED=false
+```json
+{
+  "AzureOpenAI": {
+    "Endpoint": "https://your-resource.openai.azure.com/",
+    "DeploymentName": "gpt-4o-mini"
+  },
+  "AzureContentUnderstanding": {
+    "Endpoint": "https://your-ai-foundry.services.ai.azure.com/"
+  },
+  "AzureDocumentIntelligence": {
+    "Endpoint": "https://your-doc-intel.cognitiveservices.azure.com/"
+  }
+}
 ```
 
 ## 🐳 Docker Deployment
 
-### Using Docker Compose (Recommended)
-
-```bash
-cd app
-
-# Configure environment
-cp .env.example .env
-# Edit .env with your Azure credentials
-
-# Build and run
-docker compose up --build
-
-# Run in background
-docker compose up -d
-```
-
 ### Using Docker Directly
 
 ```bash
-cd app
-
-# Build the image
+# Build the image from the repository root
 docker build -t rfp-analyzer .
 
 # Run the container
@@ -266,25 +240,29 @@ rfp-analyzer/
 ├── README.md                          # This file
 ├── LICENSE                            # MIT License
 ├── azure.yaml                         # Azure Developer CLI configuration
-├── Dockerfile                         # Root Dockerfile
+├── Dockerfile                         # Multi-stage Docker build
 ├── docs/
 │   └── ARCHITECTURE.md               # Detailed architecture documentation
-├── app/
-│   ├── main.py                       # Streamlit application entry point
-│   ├── pyproject.toml                # Python dependencies (UV)
-│   ├── requirements.txt              # Python dependencies (pip)
-│   ├── Dockerfile                    # Application Dockerfile
-│   ├── docker-compose.yml            # Docker Compose configuration
-│   ├── .env.example                  # Environment template
-│   ├── scoring_guide.md              # Default evaluation criteria
-│   └── services/
-│       ├── document_processor.py     # Document extraction orchestrator
-│       ├── content_understanding_client.py  # Azure Content Understanding
-│       ├── document_intelligence_client.py  # Azure Document Intelligence
-│       ├── scoring_agent_v2.py       # Multi-agent scoring system
-│       ├── comparison_agent.py       # Vendor comparison agent
-│       ├── processing_queue.py       # Async processing queue
-│       └── logging_config.py         # Centralized logging configuration
+├── EfpAnalyzer/
+│   ├── EfpAnalyzer.slnx              # Solution file
+│   ├── global.json                   # .NET SDK version pinning
+│   ├── EfpAnalyzer/                  # Main Blazor Web App project
+│   │   ├── EfpAnalyzer.csproj       # Project file (net10.0)
+│   │   ├── Program.cs               # Application entry point
+│   │   ├── Components/
+│   │   │   ├── App.razor            # Root component
+│   │   │   ├── Routes.razor         # Routing configuration
+│   │   │   ├── Layout/              # MainLayout, NavMenu
+│   │   │   └── Pages/               # Upload, Extract, Evaluate pages
+│   │   ├── Services/
+│   │   │   ├── DocumentProcessorService.cs  # Document extraction orchestrator
+│   │   │   ├── ScoringService.cs            # AI-powered proposal scoring
+│   │   │   └── ComparisonService.cs         # Vendor comparison & ranking
+│   │   ├── Models/                   # Data models (Scoring, Evaluation, etc.)
+│   │   ├── Properties/              # Launch settings
+│   │   └── wwwroot/                 # Static assets
+│   └── tests/
+│       └── EfpAnalyzer.Tests/       # Unit tests
 └── infra/
     ├── main.bicep                    # Main infrastructure template
     ├── main.parameters.json          # Deployment parameters
@@ -299,13 +277,9 @@ rfp-analyzer/
 
 ## 🔧 Configuration
 
-### Scoring Guide
-
-Edit `app/scoring_guide.md` to customize the default evaluation criteria and weights. The scoring agent will use this as a reference when extracting criteria from RFPs that don't explicitly define evaluation metrics.
-
 ### Document Processing
 
-Choose between extraction services in the application sidebar:
+Choose between extraction services in the application:
 - **Azure Content Understanding**: Best for complex documents with mixed content
 - **Azure Document Intelligence**: Best for structured documents and forms
 
@@ -347,33 +321,30 @@ The application supports multiple Azure OpenAI models:
 
 Download results in your preferred format:
 - **CSV**: For spreadsheet analysis
-- **Word**: For formal reporting
+- **Excel**: For formal reporting
 - **JSON**: For integration with other systems
 
 ## 🧪 Development
 
+### Building
+
+```bash
+cd EfpAnalyzer
+dotnet build
+```
+
 ### Running Tests
 
 ```bash
-cd app
-uv run pytest
-```
-
-### Code Quality
-
-```bash
-# Format code
-uv run ruff format .
-
-# Lint code
-uv run ruff check .
+cd EfpAnalyzer
+dotnet test
 ```
 
 ### Local Development with Hot Reload
 
 ```bash
-cd app
-uv run streamlit run main.py --server.runOnSave true
+cd EfpAnalyzer
+dotnet watch --project EfpAnalyzer
 ```
 
 ## 📦 Dependencies
@@ -382,20 +353,12 @@ uv run streamlit run main.py --server.runOnSave true
 
 | Package | Purpose |
 |---------|---------|
-| `streamlit` | Web application framework |
-| `agent-framework` | Microsoft Agent Framework for multi-agent orchestration |
-| `azure-identity` | Azure authentication |
-| `azure-ai-documentintelligence` | Document Intelligence SDK |
-| `pydantic` | Data validation and models |
-| `python-docx` | Word document generation |
-| `plotly` | Interactive charts |
-
-### Optional Dependencies
-
-| Package | Purpose | Install |
-|---------|---------|---------|
-| `weasyprint` | PDF generation | `uv sync --extra pdf` |
-| `markdown` | Markdown to HTML conversion | `uv sync --extra pdf` |
+| `MudBlazor` | Material Design component library for Blazor |
+| `Azure.Identity` | Azure authentication (DefaultAzureCredential) |
+| `Azure.Core` | Azure SDK core library |
+| `Plotly.Blazor` | Interactive charts |
+| `ClosedXML` | Excel document generation |
+| `CsvHelper` | CSV report generation |
 
 ## 🔒 Security
 
@@ -421,8 +384,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 🙏 Acknowledgments
 
 - [Azure AI Services](https://azure.microsoft.com/products/ai-services/) for powerful AI capabilities
-- [Streamlit](https://streamlit.io/) for the intuitive web framework
-- [Microsoft Agent Framework](https://github.com/microsoft/agent-framework) for multi-agent orchestration
+- [MudBlazor](https://mudblazor.com/) for the Material Design component library
+- [.NET Blazor](https://dotnet.microsoft.com/apps/aspnet/web-apps/blazor) for the interactive web framework
 
 ## 📞 Support
 
@@ -432,4 +395,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-**Built with ❤️ using Azure AI Services**
+**Built with ❤️ using .NET 10 and Azure AI Services**
