@@ -1,25 +1,22 @@
 # =============================================================================
-# RFP Analyzer - Docker Ignore
+# EFP Analyzer - Docker Ignore
 # =============================================================================
-# Files and directories to exclude from Docker build context
 
 # Git
 .git
 .gitignore
 
-# Python
+# .NET build artifacts
+**/bin
+**/obj
+**/out
+**/.vs
+
+# Python (legacy)
 __pycache__
 *.py[cod]
-*$py.class
-*.so
-.Python
 .venv
 venv
-ENV
-env
-.eggs
-*.egg-info
-*.egg
 
 # IDE and editors
 .vscode
@@ -39,9 +36,7 @@ Thumbs.db
 
 # Test files
 test.http
-tests/
-*.test.py
-*_test.py
+**/tests/
 
 # Documentation (not needed in container)
 docs/
@@ -49,19 +44,6 @@ docs/
 !app/scoring_guide.md
 !README.md
 
-# Build artifacts
-dist/
-build/
-*.whl
-
 # Logs
 *.log
 logs/
-
-# uv cache (we use uv.lock but not cache)
-.uv_cache
-
-# Misc
-.coverage
-.pytest_cache
-htmlcov/

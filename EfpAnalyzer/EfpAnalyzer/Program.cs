@@ -34,6 +34,7 @@ app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages:
 app.UseHttpsRedirection();
 app.UseAntiforgery();
 app.MapStaticAssets();
+app.MapGet("/health", () => Results.Ok("Healthy"));
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 

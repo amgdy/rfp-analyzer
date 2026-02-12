@@ -2,9 +2,9 @@
 name: rfp-analyzer
 services:
   rfp-analyzer:
-    project: app
+    project: EfpAnalyzer/EfpAnalyzer
     host: containerapp
-    language: python
+    language: dotnet
     docker:
       path: Dockerfile
       remoteBuild: true
