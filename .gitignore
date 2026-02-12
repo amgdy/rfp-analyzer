@@ -221,3 +221,18 @@ __marimo__/
 .azure
 infra/demo2.bicep
 test.http
+
+# .NET
+bin/
+obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+bld/
+[Ll]og/
+[Ll]ogs/
