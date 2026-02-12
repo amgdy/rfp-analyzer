@@ -1,5 +1,5 @@
 # =============================================================================
-# EFP Analyzer - Dockerfile (.NET 10 Blazor)
+# RFP Analyzer - Dockerfile (.NET 10 Blazor)
 # =============================================================================
 # Multi-stage build for optimized image size
 
@@ -11,18 +11,18 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0-preview AS build
 WORKDIR /src
 
 # Copy solution and project files first for better caching
-COPY EfpAnalyzer/EfpAnalyzer.slnx ./EfpAnalyzer/
-COPY EfpAnalyzer/global.json ./EfpAnalyzer/
-COPY EfpAnalyzer/EfpAnalyzer/EfpAnalyzer.csproj ./EfpAnalyzer/EfpAnalyzer/
+COPY RfpAnalyzer/RfpAnalyzer.slnx ./RfpAnalyzer/
+COPY RfpAnalyzer/global.json ./RfpAnalyzer/
+COPY RfpAnalyzer/RfpAnalyzer/RfpAnalyzer.csproj ./RfpAnalyzer/RfpAnalyzer/
 
 # Restore dependencies
-RUN dotnet restore EfpAnalyzer/EfpAnalyzer/EfpAnalyzer.csproj
+RUN dotnet restore RfpAnalyzer/RfpAnalyzer/RfpAnalyzer.csproj
 
 # Copy all source code
-COPY EfpAnalyzer/ ./EfpAnalyzer/
+COPY RfpAnalyzer/ ./RfpAnalyzer/
 
 # Build and publish
-RUN dotnet publish EfpAnalyzer/EfpAnalyzer/EfpAnalyzer.csproj -c Release -o /app/publish --no-restore
+RUN dotnet publish RfpAnalyzer/RfpAnalyzer/RfpAnalyzer.csproj -c Release -o /app/publish --no-restore
 
 # -----------------------------------------------------------------------------
 # Stage 2: Runtime stage
@@ -53,4 +53,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:8501/health || exit 1
 
 # Run the application
-ENTRYPOINT ["dotnet", "EfpAnalyzer.dll"]
+ENTRYPOINT ["dotnet", "RfpAnalyzer.dll"]

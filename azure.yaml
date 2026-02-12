@@ -2,7 +2,7 @@
 name: rfp-analyzer
 services:
   rfp-analyzer:
-    project: EfpAnalyzer/EfpAnalyzer
+    project: RfpAnalyzer/RfpAnalyzer
     host: containerapp
     language: dotnet
     docker:

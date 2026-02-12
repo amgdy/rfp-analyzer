@@ -124,14 +124,14 @@ Your Azure subscription needs:
 
 3. **Configure app settings**
    ```bash
-   # Edit EfpAnalyzer/EfpAnalyzer/appsettings.Development.json with your Azure endpoints
+   # Edit RfpAnalyzer/RfpAnalyzer/appsettings.Development.json with your Azure endpoints
    ```
 
 4. **Build and run**
    ```bash
-   cd EfpAnalyzer
+   cd RfpAnalyzer
    dotnet build
-   dotnet run --project EfpAnalyzer
+   dotnet run --project RfpAnalyzer
    ```
 
 5. **Open your browser** at `https://localhost:5001` (or the URL shown in the console)
@@ -195,7 +195,7 @@ The following environment variables are configured automatically during Azure de
 
 ### Manual Configuration (Local Development)
 
-For local development, edit `EfpAnalyzer/EfpAnalyzer/appsettings.Development.json`:
+For local development, edit `RfpAnalyzer/RfpAnalyzer/appsettings.Development.json`:
 
 ```json
 {
@@ -243,11 +243,11 @@ rfp-analyzer/
 ├── Dockerfile                         # Multi-stage Docker build
 ├── docs/
 │   └── ARCHITECTURE.md               # Detailed architecture documentation
-├── EfpAnalyzer/
-│   ├── EfpAnalyzer.slnx              # Solution file
+├── RfpAnalyzer/
+│   ├── RfpAnalyzer.slnx              # Solution file
 │   ├── global.json                   # .NET SDK version pinning
-│   ├── EfpAnalyzer/                  # Main Blazor Web App project
-│   │   ├── EfpAnalyzer.csproj       # Project file (net10.0)
+│   ├── RfpAnalyzer/                  # Main Blazor Web App project
+│   │   ├── RfpAnalyzer.csproj       # Project file (net10.0)
 │   │   ├── Program.cs               # Application entry point
 │   │   ├── Components/
 │   │   │   ├── App.razor            # Root component
@@ -262,7 +262,7 @@ rfp-analyzer/
 │   │   ├── Properties/              # Launch settings
 │   │   └── wwwroot/                 # Static assets
 │   └── tests/
-│       └── EfpAnalyzer.Tests/       # Unit tests
+│       └── RfpAnalyzer.Tests/       # Unit tests
 └── infra/
     ├── main.bicep                    # Main infrastructure template
     ├── main.parameters.json          # Deployment parameters
@@ -329,22 +329,22 @@ Download results in your preferred format:
 ### Building
 
 ```bash
-cd EfpAnalyzer
+cd RfpAnalyzer
 dotnet build
 ```
 
 ### Running Tests
 
 ```bash
-cd EfpAnalyzer
+cd RfpAnalyzer
 dotnet test
 ```
 
 ### Local Development with Hot Reload
 
 ```bash
-cd EfpAnalyzer
-dotnet watch --project EfpAnalyzer
+cd RfpAnalyzer
+dotnet watch --project RfpAnalyzer
 ```
 
 ## 📦 Dependencies

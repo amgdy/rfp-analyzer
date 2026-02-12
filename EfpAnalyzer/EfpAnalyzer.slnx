@@ -1,6 +1,0 @@
-<Solution>
-  <Folder Name="/tests/">
-    <Project Path="tests/EfpAnalyzer.Tests/EfpAnalyzer.Tests.csproj" />
-  </Folder>
-  <Project Path="EfpAnalyzer/EfpAnalyzer.csproj" />
-</Solution>

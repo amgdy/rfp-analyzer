@@ -1,0 +1,6 @@
+<Solution>
+  <Folder Name="/tests/">
+    <Project Path="tests/RfpAnalyzer.Tests/RfpAnalyzer.Tests.csproj" />
+  </Folder>
+  <Project Path="RfpAnalyzer/RfpAnalyzer.csproj" />
+</Solution>
