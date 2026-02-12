@@ -124,12 +124,12 @@ Your Azure subscription needs:
 
 3. **Configure app settings**
    ```bash
-   # Edit RfpAnalyzer/RfpAnalyzer/appsettings.Development.json with your Azure endpoints
+   # Edit app/RfpAnalyzer/appsettings.Development.json with your Azure endpoints
    ```
 
 4. **Build and run**
    ```bash
-   cd RfpAnalyzer
+   cd app
    dotnet build
    dotnet run --project RfpAnalyzer
    ```
@@ -195,7 +195,7 @@ The following environment variables are configured automatically during Azure de
 
 ### Manual Configuration (Local Development)
 
-For local development, edit `RfpAnalyzer/RfpAnalyzer/appsettings.Development.json`:
+For local development, edit `app/RfpAnalyzer/appsettings.Development.json`:
 
 ```json
 {
@@ -240,10 +240,10 @@ rfp-analyzer/
 ├── README.md                          # This file
 ├── LICENSE                            # MIT License
 ├── azure.yaml                         # Azure Developer CLI configuration
-├── Dockerfile                         # Multi-stage Docker build
 ├── docs/
 │   └── ARCHITECTURE.md               # Detailed architecture documentation
-├── RfpAnalyzer/
+├── app/
+│   ├── Dockerfile                     # Multi-stage Docker build
 │   ├── RfpAnalyzer.slnx              # Solution file
 │   ├── global.json                   # .NET SDK version pinning
 │   ├── RfpAnalyzer/                  # Main Blazor Web App project
@@ -329,21 +329,21 @@ Download results in your preferred format:
 ### Building
 
 ```bash
-cd RfpAnalyzer
+cd app
 dotnet build
 ```
 
 ### Running Tests
 
 ```bash
-cd RfpAnalyzer
+cd app
 dotnet test
 ```
 
 ### Local Development with Hot Reload
 
 ```bash
-cd RfpAnalyzer
+cd app
 dotnet watch --project RfpAnalyzer
 ```
 

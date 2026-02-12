@@ -2,11 +2,12 @@
 name: rfp-analyzer
 services:
   rfp-analyzer:
-    project: RfpAnalyzer/RfpAnalyzer
+    project: app/RfpAnalyzer
     host: containerapp
     language: dotnet
     docker:
-      path: Dockerfile
+      path: ../Dockerfile
+      context: ../
       remoteBuild: true
 
 hooks:
