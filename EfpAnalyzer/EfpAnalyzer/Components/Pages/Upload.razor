@@ -1,0 +1,140 @@
+@page "/upload"
+@inject AppState AppState
+@inject ISnackbar Snackbar
+@inject NavigationManager Navigation
+
+<PageTitle>Upload Documents - EFP Analyzer</PageTitle>
+
+<MudText Typo="Typo.h4" GutterBottom="true">Step 1: Upload Documents</MudText>
+<MudText Typo="Typo.body1" Class="mb-6">Upload your RFP document and vendor proposals for analysis.</MudText>
+
+<MudGrid>
+    @* RFP Document Upload *@
+    <MudItem xs="12" md="6">
+        <MudPaper Class="pa-6" Elevation="2">
+            <MudText Typo="Typo.h6" GutterBottom="true">
+                <MudIcon Icon="@Icons.Material.Filled.Description" Class="mr-2" /> RFP Document
+            </MudText>
+            <MudText Typo="Typo.body2" Class="mb-4">Upload the Request for Proposal document.</MudText>
+
+            <MudFileUpload T="IBrowserFile" Accept=".pdf,.docx,.doc,.txt,.md" FilesChanged="OnRfpFileChanged" MaximumFileCount="1">
+                <ActivatorContent>
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.CloudUpload">
+                        Upload RFP
+                    </MudButton>
+                </ActivatorContent>
+            </MudFileUpload>
+
+            @if (AppState.RfpDocument != null)
+            {
+                <MudAlert Severity="Severity.Success" Class="mt-4">
+                    <MudText Typo="Typo.body2"><strong>@AppState.RfpDocument.FileName</strong></MudText>
+                    <MudText Typo="Typo.caption">Size: @FormatFileSize(AppState.RfpDocument.Size)</MudText>
+                </MudAlert>
+            }
+        </MudPaper>
+    </MudItem>
+
+    @* Vendor Proposals Upload *@
+    <MudItem xs="12" md="6">
+        <MudPaper Class="pa-6" Elevation="2">
+            <MudText Typo="Typo.h6" GutterBottom="true">
+                <MudIcon Icon="@Icons.Material.Filled.FileCopy" Class="mr-2" /> Vendor Proposals
+            </MudText>
+            <MudText Typo="Typo.body2" Class="mb-4">Upload one or more vendor proposals.</MudText>
+
+            <MudFileUpload T="IReadOnlyList<IBrowserFile>" Accept=".pdf,.docx,.doc,.txt,.md" FilesChanged="OnProposalFilesChanged">
+                <ActivatorContent>
+                    <MudButton Variant="Variant.Filled" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.CloudUpload">
+                        Upload Proposals
+                    </MudButton>
+                </ActivatorContent>
+            </MudFileUpload>
+
+            @if (AppState.ProposalDocuments.Count > 0)
+            {
+                <MudList T="string" Class="mt-4">
+                    @foreach (var doc in AppState.ProposalDocuments)
+                    {
+                        <MudListItem Icon="@Icons.Material.Filled.InsertDriveFile">
+                            <MudText Typo="Typo.body2">@doc.FileName (@FormatFileSize(doc.Size))</MudText>
+                        </MudListItem>
+                    }
+                </MudList>
+            }
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+@* Navigation *@
+<MudPaper Class="pa-4 mt-6" Elevation="0">
+    <MudGrid Justify="Justify.SpaceBetween">
+        <MudItem>
+            <MudButton Variant="Variant.Outlined" Href="/">Back to Home</MudButton>
+        </MudItem>
+        <MudItem>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Href="/extract"
+                       Disabled="@(AppState.RfpDocument == null || AppState.ProposalDocuments.Count == 0)"
+                       EndIcon="@Icons.Material.Filled.ArrowForward">
+                Next: Extract Content
+            </MudButton>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+@code {
+    private async Task OnRfpFileChanged(IBrowserFile file)
+    {
+        try
+        {
+            var buffer = new byte[file.Size];
+            await using var stream = file.OpenReadStream(maxAllowedSize: 500 * 1024 * 1024);
+            await stream.ReadExactlyAsync(buffer);
+
+            AppState.RfpDocument = new UploadedDocument
+            {
+                FileName = file.Name,
+                Content = buffer,
+                Size = file.Size
+            };
+            Snackbar.Add($"RFP uploaded: {file.Name}", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error uploading RFP: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task OnProposalFilesChanged(IReadOnlyList<IBrowserFile> files)
+    {
+        foreach (var file in files)
+        {
+            try
+            {
+                var buffer = new byte[file.Size];
+                await using var stream = file.OpenReadStream(maxAllowedSize: 500 * 1024 * 1024);
+                await stream.ReadExactlyAsync(buffer);
+
+                AppState.ProposalDocuments.Add(new UploadedDocument
+                {
+                    FileName = file.Name,
+                    Content = buffer,
+                    Size = file.Size
+                });
+            }
+            catch (Exception ex)
+            {
+                Snackbar.Add($"Error uploading {file.Name}: {ex.Message}", Severity.Error);
+            }
+        }
+        if (files.Count > 0)
+            Snackbar.Add($"{files.Count} proposal(s) uploaded", Severity.Success);
+    }
+
+    private static string FormatFileSize(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
+        return $"{bytes / (1024.0 * 1024.0):F1} MB";
+    }
+}
