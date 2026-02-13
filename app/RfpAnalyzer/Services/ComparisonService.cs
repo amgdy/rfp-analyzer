@@ -1,20 +1,25 @@
 using System.Globalization;
-using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
-using Azure.Core;
+using Azure.AI.OpenAI;
 using Azure.Identity;
 using ClosedXML.Excel;
+using Microsoft.Agents.AI;
+using Microsoft.Extensions.AI;
+using OpenAI.Chat;
 using RfpAnalyzer.Models;
 
 namespace RfpAnalyzer.Services;
 
+/// <summary>
+/// Vendor comparison service using Microsoft Agent Framework.
+/// Uses a ComparisonAgent that analyzes evaluation results from multiple vendors
+/// and provides comprehensive comparative analysis.
+/// </summary>
 public class ComparisonService
 {
-    private readonly IHttpClientFactory _httpClientFactory;
     private readonly IConfiguration _configuration;
     private readonly ILogger<ComparisonService> _logger;
-    private readonly TokenCredential _credential;
 
     private const string ComparisonInstructions = """
         You are an expert procurement analyst specializing in vendor comparison and selection.
@@ -94,14 +99,50 @@ public class ComparisonService
         """;
 
     public ComparisonService(
-        IHttpClientFactory httpClientFactory,
         IConfiguration configuration,
         ILogger<ComparisonService> logger)
     {
-        _httpClientFactory = httpClientFactory;
         _configuration = configuration;
         _logger = logger;
-        _credential = new DefaultAzureCredential();
+    }
+
+    /// <summary>
+    /// Creates the Azure OpenAI-backed VendorComparisonAgent using Microsoft Agent Framework.
+    /// This specialist agent analyzes and compares evaluation results from multiple vendors.
+    /// </summary>
+    internal AIAgent CreateComparisonAgent()
+    {
+        var chatClient = CreateAzureOpenAIChatClient();
+        return chatClient.AsAIAgent(
+            instructions: ComparisonInstructions,
+            name: "VendorComparisonAgent",
+            description: "Analyzes evaluation results from multiple vendors and provides rankings, insights, and selection recommendations");
+    }
+
+    /// <summary>
+    /// Creates the ComparisonOrchestrator Agent that coordinates the comparison workflow.
+    /// Uses the Microsoft Agent Framework multi-agent pattern (agent-as-function-tool).
+    /// The orchestrator exposes the VendorComparisonAgent as a function tool via AsAIFunction().
+    /// </summary>
+    internal AIAgent CreateComparisonOrchestrator(AIAgent comparisonAgent)
+    {
+        var chatClient = CreateAzureOpenAIChatClient();
+        var comparisonFunction = comparisonAgent.AsAIFunction();
+
+        return chatClient.AsAIAgent(
+            instructions: """
+                You are the Vendor Comparison Orchestrator. You coordinate comparison analysis using the VendorComparisonAgent.
+
+                When given vendor evaluation data, you MUST:
+                1. Invoke VendorComparisonAgent with the complete evaluation data
+                2. Return the VendorComparisonAgent's complete JSON response exactly as received
+
+                Do NOT modify, summarize, or reformat the agent response.
+                Return the comparison agent's JSON output directly.
+                """,
+            name: "ComparisonOrchestrator",
+            description: "Orchestrates the vendor comparison workflow",
+            tools: [comparisonFunction]);
     }
 
     public async Task<ComparisonResult> CompareEvaluationsAsync(
@@ -111,8 +152,11 @@ public class ComparisonService
         Action<string>? progressCallback = null,
         CancellationToken ct = default)
     {
-        _logger.LogInformation("Starting comparison of {Count} vendor evaluations", evaluations.Count);
-        progressCallback?.Invoke("Preparing vendor comparison...");
+        _logger.LogInformation("Starting comparison of {Count} vendor evaluations using Microsoft Agent Framework", evaluations.Count);
+        progressCallback?.Invoke("VendorComparisonAgent preparing comparison...");
+
+        var agent = CreateComparisonAgent();
+        var session = await agent.CreateSessionAsync(ct);
 
         var evaluationsSummary = FormatEvaluationsForPrompt(evaluations);
 
@@ -137,8 +181,18 @@ public class ComparisonService
             Respond with ONLY valid JSON matching the schema in your instructions.
             """;
 
-        progressCallback?.Invoke("Analyzing vendor comparisons...");
-        var responseText = await CallAzureOpenAIAsync(ComparisonInstructions, userPrompt, reasoningEffort, ct);
+        progressCallback?.Invoke("VendorComparisonAgent analyzing comparisons...");
+
+        var runOptions = new AgentRunOptions
+        {
+            AdditionalProperties = new AdditionalPropertiesDictionary
+            {
+                ["reasoning_effort"] = reasoningEffort
+            }
+        };
+
+        var response = await agent.RunAsync(userPrompt, session, runOptions, ct);
+        var responseText = response.Text ?? "";
 
         return ParseComparisonResponse(responseText);
     }
@@ -388,60 +442,26 @@ public class ComparisonService
         return value;
     }
 
-    private static string CleanJsonResponse(string text)
-    {
-        text = text.Trim();
-        if (text.StartsWith("```json")) text = text[7..];
-        else if (text.StartsWith("```")) text = text[3..];
-        if (text.EndsWith("```")) text = text[..^3];
-        return text.Trim();
-    }
-
-    private async Task<string> CallAzureOpenAIAsync(string systemInstructions, string userPrompt, string reasoningEffort, CancellationToken ct)
+    private OpenAI.Chat.ChatClient CreateAzureOpenAIChatClient()
     {
         var endpoint = _configuration["AZURE_OPENAI_ENDPOINT"]
             ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not configured");
         var deploymentName = _configuration["AZURE_OPENAI_DEPLOYMENT_NAME"]
             ?? throw new InvalidOperationException("AZURE_OPENAI_DEPLOYMENT_NAME is not configured");
 
-        var client = _httpClientFactory.CreateClient();
-        var token = await GetTokenAsync(ct);
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var client = new AzureOpenAIClient(
+            new Uri(endpoint),
+            new DefaultAzureCredential());
 
-        var url = $"{endpoint.TrimEnd('/')}/openai/deployments/{deploymentName}/chat/completions?api-version=2025-01-01-preview";
-
-        var requestBody = new
-        {
-            messages = new object[]
-            {
-                new { role = "system", content = systemInstructions },
-                new { role = "user", content = userPrompt }
-            },
-            reasoning_effort = reasoningEffort
-        };
-
-        var json = JsonSerializer.Serialize(requestBody);
-        using var httpContent = new StringContent(json, Encoding.UTF8, "application/json");
-
-        var response = await client.PostAsync(url, httpContent, ct);
-        response.EnsureSuccessStatusCode();
-
-        var responseJson = await response.Content.ReadAsStringAsync(ct);
-        using var doc = JsonDocument.Parse(responseJson);
-
-        var choices = doc.RootElement.GetProperty("choices");
-        if (choices.GetArrayLength() > 0)
-        {
-            return choices[0].GetProperty("message").GetProperty("content").GetString() ?? "";
-        }
-
-        return "";
+        return client.GetChatClient(deploymentName);
     }
 
-    private async Task<string> GetTokenAsync(CancellationToken ct)
+    internal static string CleanJsonResponse(string text)
     {
-        var tokenResult = await _credential.GetTokenAsync(
-            new TokenRequestContext(new[] { "https://cognitiveservices.azure.com/.default" }), ct);
-        return tokenResult.Token;
+        text = text.Trim();
+        if (text.StartsWith("```json")) text = text[7..];
+        else if (text.StartsWith("```")) text = text[3..];
+        if (text.EndsWith("```")) text = text[..^3];
+        return text.Trim();
     }
 }

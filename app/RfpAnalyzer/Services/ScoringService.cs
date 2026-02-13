@@ -1,20 +1,24 @@
-using System.Net.Http.Headers;
-using System.Text;
-using System.Text.Json;
-using Azure.Core;
+using Azure.AI.OpenAI;
 using Azure.Identity;
+using Microsoft.Agents.AI;
+using Microsoft.Extensions.AI;
+using OpenAI.Chat;
 using RfpAnalyzer.Models;
+using System.Text.Json;
 
 namespace RfpAnalyzer.Services;
 
+/// <summary>
+/// Multi-agent scoring service using Microsoft Agent Framework.
+/// Uses two specialized agents:
+///   1. CriteriaExtractionAgent - Analyzes RFPs and extracts scoring criteria
+///   2. ProposalScoringAgent - Scores vendor proposals against extracted criteria
+/// </summary>
 public class ScoringService
 {
-    private readonly IHttpClientFactory _httpClientFactory;
     private readonly IConfiguration _configuration;
     private readonly ILogger<ScoringService> _logger;
-    private readonly TokenCredential _credential;
 
-    // The same system instructions from Python's CriteriaExtractionAgent
     private const string CriteriaExtractionInstructions = """
         You are an expert procurement analyst specializing in RFP (Request for Proposal) analysis.
 
@@ -157,14 +161,75 @@ public class ScoringService
         """;
 
     public ScoringService(
-        IHttpClientFactory httpClientFactory,
         IConfiguration configuration,
         ILogger<ScoringService> logger)
     {
-        _httpClientFactory = httpClientFactory;
         _configuration = configuration;
         _logger = logger;
-        _credential = new DefaultAzureCredential();
+    }
+
+    /// <summary>
+    /// Creates the Azure OpenAI-backed CriteriaExtractionAgent using Microsoft Agent Framework.
+    /// This agent is responsible for analyzing RFP documents and extracting scoring criteria.
+    /// </summary>
+    internal AIAgent CreateCriteriaExtractionAgent()
+    {
+        var chatClient = CreateAzureOpenAIChatClient();
+        return chatClient.AsAIAgent(
+            instructions: CriteriaExtractionInstructions,
+            name: "CriteriaExtractionAgent",
+            description: "Analyzes RFP documents and extracts comprehensive scoring criteria with weights");
+    }
+
+    /// <summary>
+    /// Creates the Azure OpenAI-backed ProposalScoringAgent using Microsoft Agent Framework.
+    /// This agent scores vendor proposals against the extracted criteria.
+    /// </summary>
+    internal AIAgent CreateProposalScoringAgent(string criteriaJson)
+    {
+        var systemInstructions = string.Format(ProposalScoringInstructionsTemplate, criteriaJson);
+        var chatClient = CreateAzureOpenAIChatClient();
+        return chatClient.AsAIAgent(
+            instructions: systemInstructions,
+            name: "ProposalScoringAgent",
+            description: "Scores a vendor proposal against extracted RFP criteria and provides detailed evaluation");
+    }
+
+    /// <summary>
+    /// Creates the Orchestrator Agent that coordinates between CriteriaExtractionAgent and ProposalScoringAgent.
+    /// Uses the Microsoft Agent Framework multi-agent pattern (agent-as-function-tool).
+    /// The orchestrator exposes the specialized agents as function tools via AsAIFunction()
+    /// and delegates work to them as appropriate.
+    /// </summary>
+    internal AIAgent CreateOrchestratorAgent(AIAgent criteriaAgent, AIAgent scoringAgent)
+    {
+        var chatClient = CreateAzureOpenAIChatClient();
+
+        // Expose each specialist agent as a callable function tool for the orchestrator
+        var criteriaFunction = criteriaAgent.AsAIFunction();
+        var scoringFunction = scoringAgent.AsAIFunction();
+
+        return chatClient.AsAIAgent(
+            instructions: """
+                You are the RFP Evaluation Orchestrator. You coordinate between two specialist agents:
+
+                1. **CriteriaExtractionAgent** - Call this first to extract scoring criteria from the RFP document.
+                   Pass the full RFP content. It returns JSON with criteria, weights, and evaluation guidance.
+
+                2. **ProposalScoringAgent** - Call this second to score a vendor proposal against criteria.
+                   Pass the vendor proposal content along with the RFP context. It returns JSON with scores and analysis.
+
+                When given an evaluation request, you MUST:
+                1. First invoke CriteriaExtractionAgent with the RFP content
+                2. Then invoke ProposalScoringAgent with the proposal content and RFP context
+                3. Return the ProposalScoringAgent's complete JSON response exactly as received
+
+                Do NOT modify, summarize, or reformat the agent responses.
+                Return the final scoring agent's JSON output directly.
+                """,
+            name: "RfpEvaluationOrchestrator",
+            description: "Orchestrates the multi-agent RFP evaluation workflow",
+            tools: [criteriaFunction, scoringFunction]);
     }
 
     public async Task<EvaluationResult> EvaluateAsync(
@@ -175,27 +240,26 @@ public class ScoringService
         CancellationToken ct = default)
     {
         var totalStart = DateTime.UtcNow;
-        _logger.LogInformation("V2 Multi-Agent evaluation started (effort: {Effort})", reasoningEffort);
+        _logger.LogInformation("Multi-Agent evaluation started using Microsoft Agent Framework (effort: {Effort})", reasoningEffort);
 
-        // Phase 1: Extract criteria
-        progressCallback?.Invoke("Phase 1: Extracting scoring criteria from RFP...");
+        // Phase 1: CriteriaExtractionAgent extracts criteria from RFP
+        progressCallback?.Invoke("Phase 1: CriteriaExtractionAgent analyzing RFP...");
         var phase1Start = DateTime.UtcNow;
-        var criteria = await ExtractCriteriaAsync(rfpContent, reasoningEffort, progressCallback, ct);
+        var criteria = await ExtractCriteriaWithAgentAsync(rfpContent, reasoningEffort, progressCallback, ct);
         var phase1Duration = (DateTime.UtcNow - phase1Start).TotalSeconds;
         _logger.LogInformation("Phase 1 completed in {Duration:F2}s - Extracted {Count} criteria",
             phase1Duration, criteria.Criteria.Count);
 
-        // Phase 2: Score proposal
-        progressCallback?.Invoke("Phase 2: Scoring proposal against extracted criteria...");
+        // Phase 2: ProposalScoringAgent scores proposal against extracted criteria
+        progressCallback?.Invoke("Phase 2: ProposalScoringAgent scoring proposal...");
         var phase2Start = DateTime.UtcNow;
-        var evaluation = await ScoreProposalAsync(criteria, proposalContent, reasoningEffort, progressCallback, ct);
+        var evaluation = await ScoreProposalWithAgentAsync(criteria, proposalContent, reasoningEffort, progressCallback, ct);
         var phase2Duration = (DateTime.UtcNow - phase2Start).TotalSeconds;
         _logger.LogInformation("Phase 2 completed in {Duration:F2}s - Total score: {Score:F2}",
             phase2Duration, evaluation.TotalScore);
 
         var totalDuration = (DateTime.UtcNow - totalStart).TotalSeconds;
 
-        // Build result
         var result = new EvaluationResult
         {
             RfpTitle = evaluation.RfpTitle,
@@ -215,8 +279,8 @@ public class ScoringService
             RiskAssessment = evaluation.RiskAssessment,
             Metadata = new EvaluationMetadata
             {
-                Version = "2.0",
-                EvaluationType = "multi-agent",
+                Version = "3.0",
+                EvaluationType = "microsoft-agent-framework",
                 EvaluationTimestamp = DateTime.UtcNow.ToString("o"),
                 TotalDurationSeconds = Math.Round(totalDuration, 2),
                 Phase1CriteriaExtractionSeconds = Math.Round(phase1Duration, 2),
@@ -227,14 +291,17 @@ public class ScoringService
             }
         };
 
-        _logger.LogInformation("V2 Multi-Agent evaluation completed in {Duration:F2}s", totalDuration);
+        _logger.LogInformation("Multi-Agent evaluation completed in {Duration:F2}s", totalDuration);
         return result;
     }
 
-    private async Task<ExtractedCriteria> ExtractCriteriaAsync(
+    private async Task<ExtractedCriteria> ExtractCriteriaWithAgentAsync(
         string rfpContent, string reasoningEffort, Action<string>? progressCallback, CancellationToken ct)
     {
-        progressCallback?.Invoke("Analyzing RFP structure and requirements...");
+        progressCallback?.Invoke("CriteriaExtractionAgent analyzing RFP structure...");
+
+        var agent = CreateCriteriaExtractionAgent();
+        var session = await agent.CreateSessionAsync(ct);
 
         var userPrompt = $"""
             Please analyze the following RFP document and extract comprehensive scoring criteria.
@@ -254,17 +321,27 @@ public class ScoringService
             Respond with ONLY valid JSON matching the schema in your instructions.
             """;
 
-        progressCallback?.Invoke("Extracting and analyzing criteria...");
-        var responseText = await CallAzureOpenAIAsync(CriteriaExtractionInstructions, userPrompt, reasoningEffort, ct);
+        progressCallback?.Invoke("CriteriaExtractionAgent extracting criteria...");
+
+        var runOptions = new AgentRunOptions
+        {
+            AdditionalProperties = new AdditionalPropertiesDictionary
+            {
+                ["reasoning_effort"] = reasoningEffort
+            }
+        };
+
+        var response = await agent.RunAsync(userPrompt, session, runOptions, ct);
+        var responseText = response.Text ?? "";
 
         return ParseCriteriaResponse(responseText);
     }
 
-    private async Task<ProposalEvaluation> ScoreProposalAsync(
+    private async Task<ProposalEvaluation> ScoreProposalWithAgentAsync(
         ExtractedCriteria criteria, string proposalContent, string reasoningEffort,
         Action<string>? progressCallback, CancellationToken ct)
     {
-        progressCallback?.Invoke("Preparing scoring framework...");
+        progressCallback?.Invoke("ProposalScoringAgent preparing scoring framework...");
 
         var criteriaJson = JsonSerializer.Serialize(criteria.Criteria.Select(c => new
         {
@@ -277,7 +354,8 @@ public class ScoringService
             evaluation_guidance = c.EvaluationGuidance
         }), new JsonSerializerOptions { WriteIndented = true });
 
-        var systemInstructions = string.Format(ProposalScoringInstructionsTemplate, criteriaJson);
+        var agent = CreateProposalScoringAgent(criteriaJson);
+        var session = await agent.CreateSessionAsync(ct);
 
         var userPrompt = $"""
             Please evaluate the following vendor proposal against the scoring criteria.
@@ -302,55 +380,37 @@ public class ScoringService
             Respond with ONLY valid JSON matching the schema in your instructions.
             """;
 
-        progressCallback?.Invoke("Scoring proposal against criteria...");
-        var responseText = await CallAzureOpenAIAsync(systemInstructions, userPrompt, reasoningEffort, ct);
+        progressCallback?.Invoke("ProposalScoringAgent scoring proposal...");
+
+        var runOptions = new AgentRunOptions
+        {
+            AdditionalProperties = new AdditionalPropertiesDictionary
+            {
+                ["reasoning_effort"] = reasoningEffort
+            }
+        };
+
+        var response = await agent.RunAsync(userPrompt, session, runOptions, ct);
+        var responseText = response.Text ?? "";
 
         return ParseScoringResponse(responseText, criteria);
     }
 
-    private async Task<string> CallAzureOpenAIAsync(string systemInstructions, string userPrompt, string reasoningEffort, CancellationToken ct)
+    private OpenAI.Chat.ChatClient CreateAzureOpenAIChatClient()
     {
         var endpoint = _configuration["AZURE_OPENAI_ENDPOINT"]
             ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not configured");
         var deploymentName = _configuration["AZURE_OPENAI_DEPLOYMENT_NAME"]
             ?? throw new InvalidOperationException("AZURE_OPENAI_DEPLOYMENT_NAME is not configured");
 
-        var client = _httpClientFactory.CreateClient();
-        var token = await GetTokenAsync(ct);
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var client = new AzureOpenAIClient(
+            new Uri(endpoint),
+            new DefaultAzureCredential());
 
-        // Use the responses API endpoint (compatible with agent-framework)
-        var url = $"{endpoint.TrimEnd('/')}/openai/deployments/{deploymentName}/chat/completions?api-version=2025-01-01-preview";
-
-        var requestBody = new
-        {
-            messages = new object[]
-            {
-                new { role = "system", content = systemInstructions },
-                new { role = "user", content = userPrompt }
-            },
-            reasoning_effort = reasoningEffort
-        };
-
-        var json = JsonSerializer.Serialize(requestBody);
-        using var httpContent = new StringContent(json, Encoding.UTF8, "application/json");
-
-        var response = await client.PostAsync(url, httpContent, ct);
-        response.EnsureSuccessStatusCode();
-
-        var responseJson = await response.Content.ReadAsStringAsync(ct);
-        using var doc = JsonDocument.Parse(responseJson);
-
-        var choices = doc.RootElement.GetProperty("choices");
-        if (choices.GetArrayLength() > 0)
-        {
-            return choices[0].GetProperty("message").GetProperty("content").GetString() ?? "";
-        }
-
-        return "";
+        return client.GetChatClient(deploymentName);
     }
 
-    private ExtractedCriteria ParseCriteriaResponse(string responseText)
+    internal ExtractedCriteria ParseCriteriaResponse(string responseText)
     {
         var text = CleanJsonResponse(responseText);
 
@@ -409,7 +469,7 @@ public class ScoringService
         }
     }
 
-    private ProposalEvaluation ParseScoringResponse(string responseText, ExtractedCriteria criteria)
+    internal ProposalEvaluation ParseScoringResponse(string responseText, ExtractedCriteria criteria)
     {
         var text = CleanJsonResponse(responseText);
 
@@ -430,7 +490,6 @@ public class ScoringService
                 RiskAssessment = root.TryGetProperty("risk_assessment", out var ra) ? ra.GetString() ?? "" : ""
             };
 
-            // Parse criterion scores
             if (root.TryGetProperty("criterion_scores", out var scoresArray))
             {
                 foreach (var cs in scoresArray.EnumerateArray())
@@ -450,17 +509,14 @@ public class ScoringService
                 }
             }
 
-            // Parse string arrays
             evaluation.OverallStrengths = ParseStringArray(root, "overall_strengths");
             evaluation.OverallWeaknesses = ParseStringArray(root, "overall_weaknesses");
             evaluation.Recommendations = ParseStringArray(root, "recommendations");
 
-            // Recalculate total score for accuracy
             var totalScore = evaluation.CriterionScores.Sum(cs => cs.WeightedScore);
             evaluation.TotalScore = Math.Round(totalScore, 2);
             evaluation.ScorePercentage = Math.Round(totalScore, 2);
 
-            // Determine grade
             evaluation.Grade = totalScore switch
             {
                 >= 90 => "A",
@@ -486,7 +542,7 @@ public class ScoringService
         }
     }
 
-    private static string CleanJsonResponse(string text)
+    internal static string CleanJsonResponse(string text)
     {
         text = text.Trim();
         if (text.StartsWith("```json")) text = text[7..];
@@ -502,12 +558,5 @@ public class ScoringService
             return array.EnumerateArray().Select(s => s.GetString() ?? "").ToList();
         }
         return new();
-    }
-
-    private async Task<string> GetTokenAsync(CancellationToken ct)
-    {
-        var tokenResult = await _credential.GetTokenAsync(
-            new TokenRequestContext(new[] { "https://cognitiveservices.azure.com/.default" }), ct);
-        return tokenResult.Token;
     }
 }
