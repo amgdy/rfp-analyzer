@@ -286,7 +286,7 @@ public class ScoringService
                 Phase1CriteriaExtractionSeconds = Math.Round(phase1Duration, 2),
                 Phase2ProposalScoringSeconds = Math.Round(phase2Duration, 2),
                 CriteriaCount = criteria.Criteria.Count,
-                ModelDeployment = _configuration["AZURE_OPENAI_DEPLOYMENT_NAME"] ?? "",
+                ModelDeployment = _configuration["AZURE_OPENAI_DEPLOYMENT_NAME"] ?? string.Empty,
                 ReasoningEffort = reasoningEffort
             }
         };
@@ -398,13 +398,19 @@ public class ScoringService
 
     private OpenAI.Chat.ChatClient CreateAzureOpenAIChatClient()
     {
-        var endpoint = _configuration["AZURE_OPENAI_ENDPOINT"]
-            ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not configured");
-        var deploymentName = _configuration["AZURE_OPENAI_DEPLOYMENT_NAME"]
-            ?? throw new InvalidOperationException("AZURE_OPENAI_DEPLOYMENT_NAME is not configured");
+        var endpoint = _configuration["AZURE_OPENAI_ENDPOINT"];
+        if (string.IsNullOrWhiteSpace(endpoint))
+            throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not configured. Set it in appsettings.json, appsettings.Development.json, or as an environment variable.");
+        var deploymentName = _configuration["AZURE_OPENAI_DEPLOYMENT_NAME"];
+        if (string.IsNullOrWhiteSpace(deploymentName))
+            throw new InvalidOperationException("AZURE_OPENAI_DEPLOYMENT_NAME is not configured. Set it in appsettings.json, appsettings.Development.json, or as an environment variable.");
+
+        // AzureOpenAIClient expects the base endpoint without path segments like /openai/
+        var endpointUri = new Uri(endpoint);
+        var baseEndpoint = new Uri($"{endpointUri.Scheme}://{endpointUri.Host}/");
 
         var client = new AzureOpenAIClient(
-            new Uri(endpoint),
+            baseEndpoint,
             new DefaultAzureCredential());
 
         return client.GetChatClient(deploymentName);

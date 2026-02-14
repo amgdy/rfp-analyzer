@@ -45,16 +45,41 @@ public class DocumentProcessorService
 
         return service switch
         {
-            ExtractionService.ContentUnderstanding => await ExtractWithContentUnderstandingAsync(fileBytes, requestId, ct),
+            ExtractionService.ContentUnderstanding => await ExtractWithContentUnderstandingAsync(fileBytes, filename, requestId, ct),
             ExtractionService.DocumentIntelligence => await ExtractWithDocumentIntelligenceAsync(fileBytes, requestId, ct),
             _ => throw new ArgumentOutOfRangeException(nameof(service))
         };
     }
 
-    private async Task<string> ExtractWithContentUnderstandingAsync(byte[] fileBytes, string requestId, CancellationToken ct)
+    /// <summary>
+    /// Maps a file extension to the corresponding MIME type for Content Understanding.
+    /// </summary>
+    private static string GetMimeType(string filename)
     {
-        var endpoint = _configuration["AZURE_CONTENT_UNDERSTANDING_ENDPOINT"]
-            ?? throw new InvalidOperationException("AZURE_CONTENT_UNDERSTANDING_ENDPOINT is not configured");
+        var ext = Path.GetExtension(filename).ToLowerInvariant();
+        return ext switch
+        {
+            ".pdf" => "application/pdf",
+            ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".doc" => "application/msword",
+            ".pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            ".ppt" => "application/vnd.ms-powerpoint",
+            ".xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ".xls" => "application/vnd.ms-excel",
+            ".png" => "image/png",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".tiff" or ".tif" => "image/tiff",
+            ".bmp" => "image/bmp",
+            ".html" or ".htm" => "text/html",
+            _ => "application/octet-stream"
+        };
+    }
+
+    private async Task<string> ExtractWithContentUnderstandingAsync(byte[] fileBytes, string filename, string requestId, CancellationToken ct)
+    {
+        var endpoint = _configuration["AZURE_CONTENT_UNDERSTANDING_ENDPOINT"];
+        if (string.IsNullOrWhiteSpace(endpoint))
+            throw new InvalidOperationException("AZURE_CONTENT_UNDERSTANDING_ENDPOINT is not configured. Set it in appsettings.json, appsettings.Development.json, or as an environment variable.");
 
         _logger.LogInformation("[REQ:{RequestId}] Processing with Azure Content Understanding...", requestId);
 
@@ -62,14 +87,23 @@ public class DocumentProcessorService
         var token = await GetTokenAsync(ct);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
-        // Step 1: Begin analysis
-        var analyzeUrl = $"{endpoint.TrimEnd('/')}/contentunderstanding/analyzers/prebuilt-documentSearch:analyze?api-version=2025-11-01";
+        // Step 1: Begin analysis — send as JSON with base64 data URI
+        var analyzeUrl = $"{endpoint.TrimEnd('/')}/contentunderstanding/analyzers/prebuilt-read:analyze?api-version=2024-12-01-preview";
 
-        using var content = new ByteArrayContent(fileBytes);
-        content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+        var mimeType = GetMimeType(filename);
+        var base64Content = Convert.ToBase64String(fileBytes);
+        var dataUri = $"data:{mimeType};base64,{base64Content}";
+
+        var requestBody = JsonSerializer.Serialize(new { url = dataUri });
+        using var content = new StringContent(requestBody, Encoding.UTF8, "application/json");
 
         var response = await client.PostAsync(analyzeUrl, content, ct);
-        response.EnsureSuccessStatusCode();
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorBody = await response.Content.ReadAsStringAsync(ct);
+            _logger.LogError("[REQ:{RequestId}] Content Understanding returned {StatusCode}: {Error}", requestId, response.StatusCode, errorBody);
+            throw new HttpRequestException($"Content Understanding analysis failed ({response.StatusCode}): {errorBody}");
+        }
 
         // Step 2: Poll for result
         var operationLocation = response.Headers.GetValues("Operation-Location").FirstOrDefault()
@@ -124,9 +158,11 @@ public class DocumentProcessorService
     /// </summary>
     private async Task<string> ExtractWithDocumentIntelligenceAsync(byte[] fileBytes, string requestId, CancellationToken ct)
     {
-        var endpoint = _configuration["AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT"]
-            ?? _configuration["AZURE_CONTENT_UNDERSTANDING_ENDPOINT"]
-            ?? throw new InvalidOperationException("AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT is not configured");
+        var endpoint = _configuration["AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT"];
+        if (string.IsNullOrWhiteSpace(endpoint))
+            endpoint = _configuration["AZURE_CONTENT_UNDERSTANDING_ENDPOINT"];
+        if (string.IsNullOrWhiteSpace(endpoint))
+            throw new InvalidOperationException("AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT is not configured. Set it in appsettings.json, appsettings.Development.json, or as an environment variable.");
 
         _logger.LogInformation("[REQ:{RequestId}] Processing with Azure Document Intelligence SDK...", requestId);
 

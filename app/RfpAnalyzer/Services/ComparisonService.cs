@@ -444,13 +444,19 @@ public class ComparisonService
 
     private OpenAI.Chat.ChatClient CreateAzureOpenAIChatClient()
     {
-        var endpoint = _configuration["AZURE_OPENAI_ENDPOINT"]
-            ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not configured");
-        var deploymentName = _configuration["AZURE_OPENAI_DEPLOYMENT_NAME"]
-            ?? throw new InvalidOperationException("AZURE_OPENAI_DEPLOYMENT_NAME is not configured");
+        var endpoint = _configuration["AZURE_OPENAI_ENDPOINT"];
+        if (string.IsNullOrWhiteSpace(endpoint))
+            throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not configured. Set it in appsettings.json, appsettings.Development.json, or as an environment variable.");
+        var deploymentName = _configuration["AZURE_OPENAI_DEPLOYMENT_NAME"];
+        if (string.IsNullOrWhiteSpace(deploymentName))
+            throw new InvalidOperationException("AZURE_OPENAI_DEPLOYMENT_NAME is not configured. Set it in appsettings.json, appsettings.Development.json, or as an environment variable.");
+
+        // AzureOpenAIClient expects the base endpoint without path segments like /openai/
+        var endpointUri = new Uri(endpoint);
+        var baseEndpoint = new Uri($"{endpointUri.Scheme}://{endpointUri.Host}/");
 
         var client = new AzureOpenAIClient(
-            new Uri(endpoint),
+            baseEndpoint,
             new DefaultAzureCredential());
 
         return client.GetChatClient(deploymentName);
