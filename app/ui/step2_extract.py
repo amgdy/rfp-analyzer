@@ -110,9 +110,7 @@ def render_step2():
 
 def run_extraction_pipeline():
     """Run the document extraction pipeline with parallel processing and live progress."""
-    import sys
-    main_module = sys.modules['__main__']
-    process_document = main_module.process_document
+    from services.pipelines import process_document
 
     extraction_service = st.session_state.extraction_service
     logger.info("====== EXTRACTION PIPELINE STARTED (Service: %s) ======", extraction_service.value)

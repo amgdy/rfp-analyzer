@@ -7,20 +7,14 @@ A comprehensive workflow for analyzing RFPs and scoring vendor proposals:
 3. AI-powered evaluation and multi-vendor comparison
 """
 
-import os
 import streamlit as st
 from pathlib import Path
-import asyncio
-import time
-import logging
 
 # Initialize centralized logging FIRST (before other imports)
 from services.logging_config import setup_logging, get_logger
 setup_logging()  # Uses OTEL_LOGGING_ENABLED env var (default: False)
 
-from services.document_processor import DocumentProcessor, ExtractionService
-from services.scoring_agent_v2 import ScoringAgentV2
-from services.comparison_agent import ComparisonAgent
+from services.document_processor import ExtractionService
 
 # Import UI modules
 from ui.landing import render_landing_page
@@ -42,77 +36,6 @@ def get_scoring_guide() -> str:
     if guide_path.exists():
         return guide_path.read_text(encoding="utf-8")
     return ""
-
-
-async def process_document(
-    file_bytes: bytes,
-    filename: str,
-    extraction_service: ExtractionService = ExtractionService.DOCUMENT_INTELLIGENCE
-) -> tuple[str, float]:
-    """Process uploaded document using the configured extraction service.
-
-    Args:
-        file_bytes: Document content as bytes
-        filename: Original filename
-        extraction_service: Which service to use for extraction
-
-    Returns:
-        Tuple of (content, duration_seconds)
-    """
-    start_time = time.time()
-    logger.info("Starting document processing: %s using %s", filename, extraction_service.value)
-
-    processor = DocumentProcessor(service=extraction_service)
-    content = await processor.extract_content(file_bytes, filename)
-
-    duration = time.time() - start_time
-    logger.info("Document processed: %s (%.2fs, %d chars)", filename, duration, len(content))
-
-    return content, duration
-
-
-async def evaluate_proposal(
-    rfp_content: str,
-    proposal_content: str,
-    global_criteria: str = "",
-    reasoning_effort: str = "high",
-    progress_callback: callable = None
-) -> tuple[dict, float]:
-    """Evaluate the vendor proposal against the RFP using AI agent.
-
-    Args:
-        rfp_content: The RFP content
-        proposal_content: The proposal content
-        global_criteria: Optional user-provided global evaluation criteria
-        reasoning_effort: Reasoning effort level ("low", "medium", "high")
-        progress_callback: Optional callback for progress updates
-
-    Returns:
-        Tuple of (results, duration_seconds)
-    """
-    start_time = time.time()
-    logger.info("Starting proposal evaluation (effort: %s)...", reasoning_effort)
-
-    # Always use V2 (multi-agent) for evaluation
-    agent = ScoringAgentV2()
-
-    # Combine RFP content with global criteria if provided
-    if global_criteria:
-        enhanced_rfp = f"{rfp_content}\n\n## Additional Evaluation Criteria (User Specified)\n\n{global_criteria}"
-    else:
-        enhanced_rfp = rfp_content
-
-    results = await agent.evaluate(
-        enhanced_rfp,
-        proposal_content,
-        reasoning_effort=reasoning_effort,
-        progress_callback=progress_callback
-    )
-
-    duration = time.time() - start_time
-    logger.info("Evaluation completed in %.2fs", duration)
-
-    return results, duration
 
 
 # Page configuration

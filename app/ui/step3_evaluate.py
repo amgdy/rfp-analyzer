@@ -86,9 +86,7 @@ def render_step3():
 
 def run_evaluation_pipeline():
     """Run the full multi-vendor evaluation pipeline with parallel processing and clean UI."""
-    import sys
-    main_module = sys.modules['__main__']
-    evaluate_proposal = main_module.evaluate_proposal
+    from services.pipelines import evaluate_proposal
 
     reasoning_effort = st.session_state.reasoning_effort
     global_criteria = st.session_state.global_criteria
