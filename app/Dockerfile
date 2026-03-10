@@ -36,15 +36,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
+# Create non-root user for security
+RUN useradd --create-home --shell /bin/bash appuser
+
 # Set working directory
 WORKDIR /app
 
 # Copy virtual environment from builder
 COPY --from=builder /app/.venv /app/.venv
 
-# Copy application code and environment file
+# Copy application code
 COPY . ./
-COPY .env ./
 
 # Set environment variables
 ENV PATH="/app/.venv/bin:$PATH"
@@ -56,6 +58,9 @@ ENV STREAMLIT_SERVER_PORT=8501
 ENV STREAMLIT_SERVER_ADDRESS=0.0.0.0
 ENV STREAMLIT_SERVER_HEADLESS=true
 ENV STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
+
+# Switch to non-root user
+USER appuser
 
 # Expose Streamlit port
 EXPOSE 8501
