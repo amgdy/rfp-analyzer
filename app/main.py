@@ -21,7 +21,7 @@ import uuid
 from datetime import datetime
 from functools import lru_cache
 from importlib.metadata import PackageNotFoundError, version as get_installed_version
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 
 # Initialize centralized logging FIRST (before other imports)
 from services.logging_config import setup_logging, get_logger
@@ -62,22 +62,28 @@ logger.info("Optional features - PDF: %s, Markdown: %s, Plotly: %s",
             PDF_AVAILABLE, MARKDOWN_AVAILABLE, PLOTLY_AVAILABLE)
 
 
+def extract_package_name(dependency: str) -> Optional[str]:
+    """Extract the package name from a PEP 508 dependency string."""
+    match = re.match(r"^[A-Za-z_][A-Za-z0-9._-]*", dependency.strip())
+    return match.group(0) if match else None
+
+
 @lru_cache(maxsize=1)
-def get_project_dependency_versions() -> List[tuple[str, str | None]]:
-    """Return configured top-level dependencies with their installed versions."""
-    pyproject_path = Path(__file__).with_name("pyproject.toml")
+def get_project_dependency_versions() -> List[Tuple[str, Optional[str]]]:
+    """Return cached top-level dependencies as (package_name, installed_version) tuples."""
+    pyproject_path = Path(__file__).parent / "pyproject.toml"
 
     try:
         pyproject_data = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
-    except (OSError, tomllib.TOMLDecodeError) as exc:
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
         logger.warning("Unable to read project dependencies from %s: %s", pyproject_path, exc)
         return []
 
     dependencies = pyproject_data.get("project", {}).get("dependencies", [])
-    package_versions: List[tuple[str, str | None]] = []
+    package_versions: List[Tuple[str, Optional[str]]] = []
 
     for dependency in dependencies:
-        package_name = re.split(r"[\s\[<>=!~;]", dependency, maxsplit=1)[0]
+        package_name = extract_package_name(dependency)
         if not package_name:
             continue
 
@@ -85,10 +91,11 @@ def get_project_dependency_versions() -> List[tuple[str, str | None]]:
             installed_version = get_installed_version(package_name)
         except PackageNotFoundError:
             installed_version = None
+            logger.warning("Installed version unavailable for dependency: %s", package_name)
 
         package_versions.append((package_name, installed_version))
 
-    return package_versions
+    return sorted(package_versions, key=lambda item: item[0].lower())
 
 
 def format_duration(seconds: float) -> str:
@@ -510,7 +517,7 @@ def render_sidebar():
                     if package_version:
                         st.caption(f"• {package_name} {package_version}")
                     else:
-                        st.caption(f"• {package_name} (not installed)")
+                        st.caption(f"• {package_name} (version unavailable)")
         
         st.markdown("---")
         st.caption("Powered by Azure AI Services, Microsoft Foundry & Agent Framework")
