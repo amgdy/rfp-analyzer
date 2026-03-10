@@ -5,19 +5,19 @@ description = "RFP Analyzer using Azure Content Understanding and Microsoft Agen
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "streamlit>=1.52.2",
+    "streamlit>=1.55.0",
     "agent-framework",
-    "azure-identity>=1.19.0",
+    "azure-identity>=1.26.0b2",
     "azure-ai-documentintelligence>=1.0.2",
-    "python-dotenv>=1.2.1",
-    "pydantic>=2.12.5",
-    "openai>=2.15.0",
+    "python-dotenv>=1.2.2",
+    "pydantic>=2.13.0b2",
+    "openai>=2.26.0",
     "requests>=2.32.5",
-    "azure-monitor-opentelemetry>=1.8.3",
+    "azure-monitor-opentelemetry>=1.8.6",
     "opentelemetry-sdk>=1.39.0",
     "azure-core-tracing-opentelemetry>=1.0.0b12",
-    "python-docx>=1.1.0",
-    "plotly>=6.5.2",
+    "python-docx>=1.2.0",
+    "plotly>=6.6.0",
 ]
 
 [project.optional-dependencies]
@@ -32,4 +32,6 @@ prerelease = "allow"
 [dependency-groups]
 dev = [
     "watchdog>=6.0.0",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=1.0.0",
 ]
