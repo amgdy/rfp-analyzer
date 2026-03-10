@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
 from .logging_config import get_logger
+from .utils import parse_json_response
 
 # Optional dependency for Word document generation
 try:
@@ -311,19 +312,8 @@ Respond with ONLY valid JSON matching the schema in your instructions."""
     
     def _parse_response(self, response_text: str) -> Dict[str, Any]:
         """Parse the agent response."""
-        text = response_text.strip()
-        
-        # Remove markdown code blocks
-        if text.startswith("```json"):
-            text = text[7:]
-        elif text.startswith("```"):
-            text = text[3:]
-        if text.endswith("```"):
-            text = text[:-3]
-        text = text.strip()
-        
         try:
-            return json.loads(text)
+            return parse_json_response(response_text)
         except json.JSONDecodeError as e:
             logger.error("Failed to parse comparison JSON: %s", str(e))
             return {

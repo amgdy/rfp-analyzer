@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
 from .logging_config import get_logger
+from .utils import parse_json_response
 
 load_dotenv()
 
@@ -262,19 +263,8 @@ Respond with ONLY valid JSON matching the schema in your instructions."""
     
     def _parse_response(self, response_text: str) -> dict:
         """Parse the agent response into a dictionary."""
-        text = response_text.strip()
-        
-        # Remove markdown code blocks
-        if text.startswith("```json"):
-            text = text[7:]
-        elif text.startswith("```"):
-            text = text[3:]
-        if text.endswith("```"):
-            text = text[:-3]
-        text = text.strip()
-        
         try:
-            data = json.loads(text)
+            data = parse_json_response(response_text)
             
             # Validate and normalize weights
             criteria = data.get("criteria", [])
@@ -516,19 +506,8 @@ Respond with ONLY valid JSON matching the schema in your instructions."""
     
     def _parse_response(self, response_text: str, criteria: ExtractedCriteria) -> dict:
         """Parse the agent response into a dictionary."""
-        text = response_text.strip()
-        
-        # Remove markdown code blocks
-        if text.startswith("```json"):
-            text = text[7:]
-        elif text.startswith("```"):
-            text = text[3:]
-        if text.endswith("```"):
-            text = text[:-3]
-        text = text.strip()
-        
         try:
-            data = json.loads(text)
+            data = parse_json_response(response_text)
             
             # Ensure evaluation_date is set
             if not data.get("evaluation_date"):
