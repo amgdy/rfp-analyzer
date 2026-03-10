@@ -1,68 +1,56 @@
 # =============================================================================
-# RFP Analyzer - Dockerfile
+# RFP Analyzer - Dockerfile (.NET 10 Blazor)
 # =============================================================================
 # Multi-stage build for optimized image size
-# Includes WeasyPrint dependencies for PDF export
 
 # -----------------------------------------------------------------------------
-# Stage 1: Build stage with uv for fast dependency installation
+# Stage 1: Build stage
 # -----------------------------------------------------------------------------
-FROM python:3.13-slim AS builder
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 
-# Install uv for fast package management
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+WORKDIR /src
 
-# Set working directory
-WORKDIR /app
+# Copy solution and project files first for better caching
+COPY RfpAnalyzer.slnx ./
+COPY global.json ./
+COPY RfpAnalyzer/RfpAnalyzer.csproj ./RfpAnalyzer/
 
-# Copy dependency files first for better caching
-COPY pyproject.toml uv.lock ./
+# Restore dependencies
+RUN dotnet restore RfpAnalyzer/RfpAnalyzer.csproj
 
-# Install dependencies (including PDF export extras)
-RUN uv sync --frozen --no-dev --all-extras
+# Copy all source code
+COPY RfpAnalyzer/ ./RfpAnalyzer/
+
+# Build and publish
+RUN dotnet publish RfpAnalyzer/RfpAnalyzer.csproj -c Release -o /app/publish
 
 # -----------------------------------------------------------------------------
 # Stage 2: Runtime stage
 # -----------------------------------------------------------------------------
-FROM python:3.13-slim AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 
-# Install system dependencies for WeasyPrint (PDF export)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libpango-1.0-0 \
-    libpangocairo-1.0-0 \
-    libgdk-pixbuf-2.0-0 \
-    libffi-dev \
-    shared-mime-info \
-    && rm -rf /var/lib/apt/lists/* \
-    && apt-get clean
+# Create non-root user for security
+RUN useradd --create-home --shell /bin/bash appuser
 
-# Set working directory
 WORKDIR /app
 
-# Copy virtual environment from builder
-COPY --from=builder /app/.venv /app/.venv
-
-# Copy application code and environment file
-COPY . ./
-COPY .env ./
+# Copy published output from build stage
+COPY --from=build /app/publish .
 
 # Set environment variables
-ENV PATH="/app/.venv/bin:$PATH"
-ENV PYTHONPATH="/app"
-ENV PYTHONUNBUFFERED=1
+ENV ASPNETCORE_URLS=http://+:8501
+ENV ASPNETCORE_ENVIRONMENT=Production
+ENV DOTNET_RUNNING_IN_CONTAINER=true
 
-# Streamlit configuration
-ENV STREAMLIT_SERVER_PORT=8501
-ENV STREAMLIT_SERVER_ADDRESS=0.0.0.0
-ENV STREAMLIT_SERVER_HEADLESS=true
-ENV STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
+# Switch to non-root user
+USER appuser
 
-# Expose Streamlit port
+# Expose port (matching original Streamlit port for IaC compatibility)
 EXPOSE 8501
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health')" || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:8501/health || exit 1
 
-# Run Streamlit
-CMD ["streamlit", "run", "main.py", "--server.port=8501", "--server.address=0.0.0.0"]
+# Run the application
+ENTRYPOINT ["dotnet", "RfpAnalyzer.dll"]

@@ -1,0 +1,15 @@
+/* MudBlazor handles most styling. Minimal overrides only. */
+
+h1:focus {
+    outline: none;
+}
+
+.blazor-error-boundary {
+    background: #b32121;
+    padding: 1rem;
+    color: white;
+}
+
+.blazor-error-boundary::after {
+    content: "An error has occurred.";
+}

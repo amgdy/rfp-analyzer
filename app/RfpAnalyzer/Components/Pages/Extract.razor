@@ -1,0 +1,157 @@
+@page "/extract"
+@inject AppState AppState
+@inject DocumentProcessorService DocumentProcessor
+@inject ISnackbar Snackbar
+@inject NavigationManager Navigation
+@rendermode InteractiveServer
+
+<PageTitle>Extract Content - RFP Analyzer</PageTitle>
+
+<MudText Typo="Typo.h4" GutterBottom="true">Step 2: Extract & Configure</MudText>
+<MudText Typo="Typo.body1" Class="mb-6">Configure extraction settings and process your documents.</MudText>
+
+@if (AppState.RfpDocument == null)
+{
+    <MudAlert Severity="Severity.Warning">Please upload documents first.</MudAlert>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" Href="/upload" Class="mt-4">Go to Upload</MudButton>
+    return;
+}
+
+<MudGrid>
+    @* Configuration *@
+    <MudItem xs="12" md="4">
+        <MudPaper Class="pa-6" Elevation="2">
+            <MudText Typo="Typo.h6" GutterBottom="true">Extraction Service</MudText>
+            <MudRadioGroup @bind-Value="AppState.SelectedService">
+                <MudRadio Value="ExtractionService.ContentUnderstanding" Color="Color.Primary">
+                    Content Understanding
+                </MudRadio>
+                <MudRadio Value="ExtractionService.DocumentIntelligence" Color="Color.Primary">
+                    Document Intelligence
+                </MudRadio>
+            </MudRadioGroup>
+
+            <MudDivider Class="my-4" />
+
+            <MudText Typo="Typo.h6" GutterBottom="true">Analysis Depth</MudText>
+            <MudRadioGroup @bind-Value="AppState.ReasoningEffort">
+                <MudRadio Value="@("low")" Color="Color.Success">Standard (~5 min)</MudRadio>
+                <MudRadio Value="@("medium")" Color="Color.Warning">Thorough (~10 min)</MudRadio>
+                <MudRadio Value="@("high")" Color="Color.Error">Comprehensive (~15 min)</MudRadio>
+            </MudRadioGroup>
+
+            <MudDivider Class="my-4" />
+
+            <MudTextField @bind-Value="AppState.CustomCriteria" Label="Custom Criteria (Optional)"
+                          Variant="Variant.Outlined" Lines="5"
+                          HelperText="Override default criteria extraction with your own guidelines." />
+        </MudPaper>
+    </MudItem>
+
+    @* Extraction Status *@
+    <MudItem xs="12" md="8">
+        <MudPaper Class="pa-6" Elevation="2">
+            <MudText Typo="Typo.h6" GutterBottom="true">Document Extraction</MudText>
+
+            @if (_isExtracting)
+            {
+                <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-4" />
+                <MudText Typo="Typo.body2" Class="mb-2">@_currentStatus</MudText>
+            }
+
+            @* RFP Status *@
+            <MudAlert Severity="@(AppState.RfpDocument.IsExtracted ? Severity.Success : Severity.Info)" Class="mb-2">
+                @(AppState.RfpDocument.IsExtracted ? "✅" : "⏳") RFP: @AppState.RfpDocument.FileName
+                @if (AppState.RfpDocument.IsExtracted)
+                {
+                    <MudText Typo="Typo.caption"> — @(AppState.RfpDocument.ExtractedContent?.Length ?? 0) chars extracted</MudText>
+                }
+            </MudAlert>
+
+            @* Proposal Status *@
+            @foreach (var doc in AppState.ProposalDocuments)
+            {
+                <MudAlert Severity="@(doc.IsExtracted ? Severity.Success : Severity.Info)" Class="mb-2">
+                    @(doc.IsExtracted ? "✅" : "⏳") @doc.FileName
+                    @if (doc.IsExtracted)
+                    {
+                        <MudText Typo="Typo.caption"> — @(doc.ExtractedContent?.Length ?? 0) chars extracted</MudText>
+                    }
+                </MudAlert>
+            }
+
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Class="mt-4"
+                       OnClick="ExtractAllDocuments" Disabled="_isExtracting"
+                       StartIcon="@Icons.Material.Filled.PlayArrow">
+                @(_isExtracting ? "Extracting..." : "Extract Content")
+            </MudButton>
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+@* Navigation *@
+<MudPaper Class="pa-4 mt-6" Elevation="0">
+    <MudGrid Justify="Justify.SpaceBetween">
+        <MudItem>
+            <MudButton Variant="Variant.Outlined" Href="/upload">Back to Upload</MudButton>
+        </MudItem>
+        <MudItem>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Href="/evaluate"
+                       Disabled="@(!AllExtracted())"
+                       EndIcon="@Icons.Material.Filled.ArrowForward">
+                Next: Evaluate
+            </MudButton>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+@code {
+    private bool _isExtracting = false;
+    private string _currentStatus = "";
+
+    private bool AllExtracted()
+    {
+        return AppState.RfpDocument?.IsExtracted == true &&
+               AppState.ProposalDocuments.All(p => p.IsExtracted);
+    }
+
+    private async Task ExtractAllDocuments()
+    {
+        _isExtracting = true;
+        try
+        {
+            // Extract RFP
+            if (!AppState.RfpDocument!.IsExtracted)
+            {
+                _currentStatus = $"Extracting RFP: {AppState.RfpDocument.FileName}...";
+                StateHasChanged();
+                AppState.RfpDocument.ExtractedContent = await DocumentProcessor.ExtractContentAsync(
+                    AppState.RfpDocument.Content, AppState.RfpDocument.FileName, AppState.SelectedService);
+                AppState.RfpDocument.IsExtracted = true;
+                StateHasChanged();
+            }
+
+            // Extract proposals
+            foreach (var doc in AppState.ProposalDocuments.Where(d => !d.IsExtracted))
+            {
+                _currentStatus = $"Extracting: {doc.FileName}...";
+                StateHasChanged();
+                doc.ExtractedContent = await DocumentProcessor.ExtractContentAsync(
+                    doc.Content, doc.FileName, AppState.SelectedService);
+                doc.IsExtracted = true;
+                StateHasChanged();
+            }
+
+            Snackbar.Add("All documents extracted successfully!", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Extraction error: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _isExtracting = false;
+            _currentStatus = "";
+        }
+    }
+}
