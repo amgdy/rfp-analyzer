@@ -1,0 +1,844 @@
+"""Step 3: Evaluate and Compare vendor proposals."""
+
+import streamlit as st
+import asyncio
+import time
+import uuid
+import json
+
+from services.utils import format_duration
+from services.comparison_agent import ComparisonAgent, generate_word_report, generate_full_analysis_report
+from services.processing_queue import ProcessingQueue, QueueItemStatus
+from services.logging_config import get_logger
+from ui.styles import STEP_ANIMATION_CSS
+from ui.components import render_step_indicator
+
+# Optional chart support
+try:
+    import plotly.express as px
+    import plotly.graph_objects as go
+    PLOTLY_AVAILABLE = True
+except ImportError:
+    PLOTLY_AVAILABLE = False
+
+logger = get_logger(__name__)
+
+
+def render_step3():
+    """Step 3: Evaluate and Compare."""
+    render_step_indicator(current_step=3)
+
+    st.header("Step 3: Evaluate & Compare")
+    st.markdown("Evaluating vendor proposals against RFP requirements and generating comparison.")
+
+    # Show files summary
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.session_state.rfp_file:
+            st.info(f"📄 RFP: {st.session_state.rfp_file['name']}")
+    with col2:
+        if st.session_state.proposal_files:
+            st.info(f"📝 Proposals: {len(st.session_state.proposal_files)} file(s)")
+
+    # Show evaluation process info
+    with st.expander("🤖 Multi-Agent Evaluation Process", expanded=False):
+        st.info("""
+        **Evaluation Process:**
+
+        1. **Criteria Extraction Agent**: Analyzes the RFP document to automatically
+           extract scoring criteria with weights (totaling 100%).
+
+        2. **Proposal Scoring Agent**: Evaluates each vendor proposal against the
+           extracted criteria, providing detailed scores and justifications.
+
+        3. **Comparison Agent**: Compares all vendor scores and generates a
+           comprehensive comparison report with rankings.
+
+        This approach ensures that scoring is tailored to each specific RFP's requirements.
+        """)
+
+    # Check if evaluation has been completed
+    if st.session_state.evaluation_results and st.session_state.comparison_results:
+        render_comparison_results()
+    else:
+        # Start evaluation
+        if st.button(
+            "🎯 Start Evaluation",
+            type="primary",
+            use_container_width=True,
+            disabled=st.session_state.is_processing
+        ):
+            logger.info("User starting evaluation - Mode: individual, Effort: %s, Proposals: %d",
+                       st.session_state.reasoning_effort,
+                       len(st.session_state.proposal_files))
+            st.session_state.is_processing = True
+            run_evaluation_pipeline()
+
+    # Navigation
+    st.markdown("---")
+    if st.button("⬅️ Back to Step 2", disabled=st.session_state.is_processing):
+        logger.info("User navigating back to Step 2")
+        st.session_state.step = 2
+        st.session_state.evaluation_results = []
+        st.session_state.comparison_results = None
+        st.rerun()
+
+
+def run_evaluation_pipeline():
+    """Run the full multi-vendor evaluation pipeline with parallel processing and clean UI."""
+    import sys
+    main_module = sys.modules['__main__']
+    evaluate_proposal = main_module.evaluate_proposal
+
+    reasoning_effort = st.session_state.reasoning_effort
+    global_criteria = st.session_state.global_criteria
+
+    logger.info("====== EVALUATION PIPELINE STARTED (Effort: %s) ======", reasoning_effort)
+    pipeline_start = time.time()
+
+    # Inject animation CSS
+    st.markdown(STEP_ANIMATION_CSS, unsafe_allow_html=True)
+
+    # Create scoring queue
+    scoring_queue = ProcessingQueue(name="Proposal Scoring")
+    proposal_files = st.session_state.proposal_files
+
+    # Add each proposal as a separate queue item with unique request ID
+    for i, proposal_file in enumerate(proposal_files):
+        request_id = str(uuid.uuid4())[:8]
+        scoring_queue.add_item(
+            id=f"proposal_{i}",
+            name=proposal_file['name'],
+            item_type="evaluation",
+            metadata={
+                "filename": proposal_file["name"],
+                "request_id": request_id
+            }
+        )
+        logger.info("Queued proposal for scoring: %s (request_id: %s)",
+                   proposal_file['name'], request_id)
+
+    # Add comparison step if multiple proposals
+    if len(proposal_files) > 1:
+        comparison_request_id = str(uuid.uuid4())[:8]
+        scoring_queue.add_item(
+            id="comparison",
+            name="Vendor Comparison",
+            item_type="comparison",
+            metadata={"request_id": comparison_request_id}
+        )
+        logger.info("Queued vendor comparison (request_id: %s)", comparison_request_id)
+
+    scoring_queue.start()
+    st.session_state.scoring_queue = scoring_queue
+
+    # UI Setup - single placeholder for clean updates
+    st.subheader("🎯 Evaluating Proposals")
+    status_placeholder = st.empty()
+
+    def render_status():
+        """Render the current scoring status."""
+        with status_placeholder.container():
+            elapsed = time.time() - pipeline_start
+            st.markdown(f"**⏱️ Elapsed: `{format_duration(elapsed)}`**")
+
+            # Progress bar
+            progress = scoring_queue.get_progress()
+            st.progress(progress["percentage"] / 100)
+
+            # Items status
+            for item in scoring_queue.items:
+                icon = item.get_status_icon()
+                elapsed_time = format_duration(item.get_elapsed_time()) if item.start_time else "-"
+
+                if item.item_type == "comparison":
+                    label = f"📊 {item.name}"
+                else:
+                    label = f"📝 {item.name}"
+
+                if item.status == QueueItemStatus.COMPLETED:
+                    extra = ""
+                    if item.result and isinstance(item.result, dict) and "total_score" in item.result:
+                        score = item.result["total_score"]
+                        grade = item.result.get("grade", "")
+                        extra = f" — Score: **{score:.1f}** ({grade})"
+                    st.success(f"{icon} {label}{extra} — `{elapsed_time}`")
+                elif item.status == QueueItemStatus.PROCESSING:
+                    st.info(f"{icon} {label} — Processing... `{elapsed_time}`")
+                elif item.status == QueueItemStatus.FAILED:
+                    st.error(f"{icon} {label} — Failed: {item.error_message}")
+                else:
+                    st.warning(f"{icon} {label} — Waiting...")
+
+    try:
+        evaluation_results = []
+
+        # Mark all proposal items as processing
+        for i in range(len(proposal_files)):
+            item = scoring_queue.get_item(f"proposal_{i}")
+            item.start()
+
+        render_status()
+
+        # Define async function for parallel proposal evaluation
+        async def evaluate_all_proposals():
+            tasks = []
+            for i, proposal_file in enumerate(proposal_files):
+                proposal_name = proposal_file["name"]
+                proposal_content = st.session_state.proposal_contents.get(proposal_name, "")
+
+                task = evaluate_proposal(
+                    st.session_state.rfp_content,
+                    proposal_content,
+                    global_criteria=global_criteria,
+                    reasoning_effort=reasoning_effort
+                )
+                tasks.append(task)
+            return await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Run parallel evaluation
+        results = asyncio.run(evaluate_all_proposals())
+
+        # Process results
+        for i, result in enumerate(results):
+            proposal_name = proposal_files[i]["name"]
+            item = scoring_queue.get_item(f"proposal_{i}")
+
+            if isinstance(result, Exception):
+                item.fail(str(result))
+                logger.error("Failed to evaluate %s: %s", proposal_name, str(result))
+            else:
+                eval_result, duration = result
+                eval_result["_proposal_file"] = proposal_name
+                evaluation_results.append(eval_result)
+                item.complete(result=eval_result)
+                st.session_state.step_durations[f"eval_{proposal_name}"] = duration
+                logger.info("Proposal %s evaluated in %.2fs", proposal_name, duration)
+
+        render_status()
+
+        # Check for failures using get_failed_items
+        failed_items = scoring_queue.get_failed_items()
+        if failed_items:
+            raise Exception(f"Failed to evaluate {len(failed_items)} proposal(s)")
+
+        st.session_state.evaluation_results = evaluation_results
+
+        # Compare results if multiple proposals
+        if len(evaluation_results) > 1:
+            comparison_item = scoring_queue.get_item("comparison")
+            comparison_item.start()
+
+            render_status()
+
+            try:
+                comparison_agent = ComparisonAgent()
+                rfp_title = evaluation_results[0].get("rfp_title", "RFP Evaluation")
+
+                comparison_results = asyncio.run(
+                    comparison_agent.compare_evaluations(
+                        evaluation_results,
+                        rfp_title,
+                        reasoning_effort=reasoning_effort
+                    )
+                )
+
+                st.session_state.comparison_results = comparison_results
+                comparison_item.complete(result=comparison_results)
+                logger.info("Comparison completed")
+
+            except Exception as e:
+                comparison_item.fail(str(e))
+                raise
+        else:
+            # Single proposal - create basic comparison structure
+            if evaluation_results:
+                st.session_state.comparison_results = {
+                    "rfp_title": evaluation_results[0].get("rfp_title", "RFP Evaluation"),
+                    "total_vendors": len(evaluation_results),
+                    "vendor_rankings": [{
+                        "rank": 1,
+                        "vendor_name": evaluation_results[0].get("supplier_name", "Unknown"),
+                        "total_score": evaluation_results[0].get("total_score", 0),
+                        "grade": evaluation_results[0].get("grade", "N/A"),
+                        "key_strengths": evaluation_results[0].get("overall_strengths", [])[:3],
+                        "key_concerns": evaluation_results[0].get("overall_weaknesses", [])[:3],
+                        "recommendation": evaluation_results[0].get("recommendation", "")
+                    }],
+                    "selection_recommendation": evaluation_results[0].get("recommendation", ""),
+                    "comparison_insights": []
+                }
+
+        scoring_queue.finish()
+        st.session_state.scoring_queue = scoring_queue
+
+        total_duration = time.time() - pipeline_start
+        st.session_state.step_durations["evaluation_total"] = total_duration
+
+        logger.info("====== EVALUATION PIPELINE COMPLETED in %.2fs ======", total_duration)
+
+        # Final render
+        render_status()
+
+        st.success(f"✅ **Evaluation complete in {format_duration(total_duration)}!**")
+
+        st.session_state.is_processing = False
+        time.sleep(1)
+        st.rerun()
+
+    except Exception as e:
+        logger.error("Evaluation pipeline failed: %s", str(e))
+        scoring_queue.finish()
+        st.session_state.scoring_queue = scoring_queue
+        st.session_state.is_processing = False
+        render_status()
+        st.error(f"❌ Error during evaluation: {str(e)}")
+
+
+# ---------------------------------------------------------------------------
+# Comparison results rendering
+# ---------------------------------------------------------------------------
+
+def render_comparison_results():
+    """Render the multi-vendor comparison results."""
+    st.markdown("---")
+
+    comparison = st.session_state.comparison_results
+    evaluations = st.session_state.evaluation_results
+
+    # Display timing if available
+    if st.session_state.step_durations:
+        total_time = st.session_state.step_durations.get("evaluation_total", 0)
+        st.info(f"⏱️ Total evaluation time: {format_duration(total_time)}")
+
+    # Vendor Rankings Summary
+    st.subheader("🏆 Vendor Rankings")
+
+    rankings = comparison.get("vendor_rankings", [])
+    if rankings:
+        cols = st.columns(min(len(rankings), 4))
+        for i, ranking in enumerate(rankings[:4]):
+            with cols[i]:
+                rank = ranking.get("rank", i+1)
+                medal = "🥇" if rank == 1 else "🥈" if rank == 2 else "🥉" if rank == 3 else "🏅"
+                st.metric(
+                    label=f"{medal} #{rank}",
+                    value=ranking.get("vendor_name", "Unknown")[:20],
+                    delta=f"{ranking.get('total_score', 0):.1f} ({ranking.get('grade', 'N/A')})"
+                )
+
+    # Selection Recommendation
+    recommendation = comparison.get("selection_recommendation", "")
+    if recommendation:
+        st.success(f"✅ **Recommendation:** {recommendation}")
+
+    st.markdown("---")
+
+    # Tabs for different views
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "📊 Dashboard",
+        "🔍 Comparison Overview",
+        "📋 Individual Reports",
+        "📈 Detailed Scores",
+        "📥 Export"
+    ])
+
+    with tab1:
+        render_metrics_dashboard(comparison, evaluations)
+
+    with tab2:
+        render_comparison_overview(comparison, evaluations)
+
+    with tab3:
+        render_individual_reports(evaluations)
+
+    with tab4:
+        render_detailed_scores(evaluations)
+
+    with tab5:
+        render_export_options(comparison, evaluations)
+
+
+def render_metrics_dashboard(comparison: dict, evaluations: list):
+    """Render the metrics dashboard with charts for each criterion."""
+    st.subheader("📊 Metrics Dashboard")
+    st.markdown("Visual comparison of vendor performance across all evaluation criteria.")
+
+    if not evaluations:
+        st.warning("No evaluations available to display.")
+        return
+
+    if not PLOTLY_AVAILABLE:
+        st.warning("📊 Plotly is not installed. Install it with `pip install plotly` for interactive charts.")
+        _render_basic_metrics_dashboard(comparison, evaluations)
+        return
+
+    # Get all criteria from first evaluation
+    criteria = []
+    if evaluations[0].get("criterion_scores"):
+        criteria = evaluations[0]["criterion_scores"]
+
+    if not criteria:
+        st.warning("No criteria scores available.")
+        return
+
+    # Overall vendor comparison bar chart (total scores)
+    st.markdown("### 🏆 Overall Vendor Performance")
+    _render_overall_comparison_bar(evaluations)
+
+    st.markdown("---")
+    st.markdown("### 📈 Performance by Criterion")
+    st.markdown("Each chart shows how vendor scores compare for a specific evaluation criterion. "
+                "Taller bars indicate higher scores.")
+
+    # Create bar charts for each criterion
+    num_criteria = len(criteria)
+    cols_per_row = 2
+
+    for i in range(0, num_criteria, cols_per_row):
+        cols = st.columns(cols_per_row)
+
+        for j in range(cols_per_row):
+            criterion_idx = i + j
+            if criterion_idx >= num_criteria:
+                break
+
+            criterion = criteria[criterion_idx]
+            criterion_name = criterion.get("criterion_name", f"Criterion {criterion_idx + 1}")
+            criterion_weight = criterion.get("weight", 0)
+
+            with cols[j]:
+                _render_criterion_bar_chart(evaluations, criterion_idx, criterion_name, criterion_weight)
+
+    # Vendor recommendation section
+    st.markdown("---")
+    st.markdown("### 💡 Vendor Recommendations by Criterion")
+    _render_criterion_recommendations(comparison, evaluations)
+
+
+def _render_overall_comparison_bar(evaluations: list):
+    """Render bar chart showing overall vendor comparison."""
+    vendor_names = []
+    total_scores = []
+    grades = []
+
+    for eval_result in evaluations:
+        vendor_name = eval_result.get("supplier_name", "Unknown")
+        total_score = eval_result.get("total_score", 0)
+        grade = eval_result.get("grade", "N/A")
+        vendor_names.append(vendor_name)
+        total_scores.append(total_score)
+        grades.append(grade)
+
+    # Sort by score descending
+    sorted_data = sorted(zip(vendor_names, total_scores, grades), key=lambda x: x[1], reverse=True)
+    vendor_names, total_scores, grades = zip(*sorted_data) if sorted_data else ([], [], [])
+
+    # Create bar chart
+    fig = px.bar(
+        x=list(vendor_names),
+        y=list(total_scores),
+        title="Total Score Comparison",
+        labels={"x": "Vendor", "y": "Total Score"},
+        color=list(total_scores),
+        color_continuous_scale="RdYlGn",
+        text=[f"{s:.1f} ({g})" for s, g in zip(total_scores, grades)]
+    )
+
+    fig.update_traces(
+        textposition='outside',
+        hovertemplate="<b>%{x}</b><br>Score: %{y:.1f}<extra></extra>"
+    )
+
+    fig.update_layout(
+        showlegend=False,
+        xaxis_title="Vendor",
+        yaxis_title="Total Score",
+        yaxis_range=[0, 105],
+        margin=dict(t=50, b=50, l=50, r=20),
+        height=400,
+        coloraxis_showscale=False
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def _render_criterion_bar_chart(evaluations: list, criterion_idx: int, criterion_name: str, weight: float):
+    """Render a bar chart for a specific criterion showing vendor scores."""
+    vendor_names = []
+    scores = []
+
+    for eval_result in evaluations:
+        vendor_name = eval_result.get("supplier_name", "Unknown")
+        criterion_scores = eval_result.get("criterion_scores", [])
+
+        if criterion_idx < len(criterion_scores):
+            score = criterion_scores[criterion_idx].get("raw_score", 0)
+        else:
+            score = 0
+
+        vendor_names.append(vendor_name)
+        scores.append(score)
+
+    # Sort by score descending
+    sorted_data = sorted(zip(vendor_names, scores), key=lambda x: x[1], reverse=True)
+    vendor_names, scores = zip(*sorted_data) if sorted_data else ([], [])
+
+    # Find best vendor for this criterion
+    best_vendor = vendor_names[0] if vendor_names else "N/A"
+    best_score = scores[0] if scores else 0
+
+    # Create bar chart
+    fig = px.bar(
+        x=list(vendor_names),
+        y=list(scores),
+        title=f"{criterion_name}<br><sup>Weight: {weight:.1f}% | Best: {best_vendor} ({best_score:.1f})</sup>",
+        labels={"x": "Vendor", "y": "Score"},
+        color=list(scores),
+        color_continuous_scale="RdYlGn",
+        text=[f"{s:.1f}" for s in scores]
+    )
+
+    fig.update_traces(
+        textposition='outside',
+        hovertemplate="<b>%{x}</b><br>Score: %{y:.1f}/100<extra></extra>"
+    )
+
+    fig.update_layout(
+        showlegend=False,
+        xaxis_title="",
+        yaxis_title="Score",
+        yaxis_range=[0, 105],
+        margin=dict(t=60, b=30, l=40, r=10),
+        height=300,
+        coloraxis_showscale=False,
+        xaxis_tickangle=-45 if len(vendor_names) > 3 else 0
+    )
+
+    st.plotly_chart(fig, use_container_width=True, key=f"bar_{criterion_idx}")
+
+
+def _render_criterion_recommendations(comparison: dict, evaluations: list):
+    """Render recommendations for each criterion based on vendor performance."""
+    criterion_comparisons = comparison.get("criterion_comparisons", [])
+
+    if not criterion_comparisons:
+        # Fall back to generating recommendations from evaluations
+        if not evaluations or not evaluations[0].get("criterion_scores"):
+            return
+
+        criteria = evaluations[0]["criterion_scores"]
+        for criterion_idx, criterion in enumerate(criteria):
+            criterion_name = criterion.get("criterion_name", f"Criterion {criterion_idx + 1}")
+
+            # Find best vendor for this criterion
+            best_vendor = None
+            best_score = -1
+            all_scores = []
+
+            for eval_result in evaluations:
+                vendor_name = eval_result.get("supplier_name", "Unknown")
+                criterion_scores = eval_result.get("criterion_scores", [])
+
+                if criterion_idx < len(criterion_scores):
+                    score = criterion_scores[criterion_idx].get("raw_score", 0)
+                    all_scores.append((vendor_name, score))
+                    if score > best_score:
+                        best_score = score
+                        best_vendor = vendor_name
+
+            if best_vendor:
+                with st.expander(f"**{criterion_name}** - Recommended: {best_vendor}"):
+                    st.markdown(f"**Best Performer:** {best_vendor} (Score: {best_score:.1f}/100)")
+
+                    # Show all vendor scores
+                    st.markdown("**All Vendors:**")
+                    for vendor, score in sorted(all_scores, key=lambda x: x[1], reverse=True):
+                        icon = "🥇" if vendor == best_vendor else "📊"
+                        st.markdown(f"  {icon} {vendor}: {score:.1f}/100")
+    else:
+        # Use the comparison agent's criterion comparisons
+        for cc in criterion_comparisons:
+            criterion_name = cc.get("criterion_name", "Unknown")
+            best_vendor = cc.get("best_vendor", "N/A")
+            worst_vendor = cc.get("worst_vendor", "N/A")
+            score_range = cc.get("score_range", "N/A")
+            insights = cc.get("insights", "")
+            weight = cc.get("weight", 0)
+
+            with st.expander(f"**{criterion_name}** (Weight: {weight:.1f}%) - Recommended: {best_vendor}"):
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("🥇 Best", best_vendor)
+                with col2:
+                    st.metric("📉 Lowest", worst_vendor)
+                with col3:
+                    st.metric("📊 Score Range", score_range)
+
+                if insights:
+                    st.markdown(f"**Why choose {best_vendor}:** {insights}")
+
+
+def _render_basic_metrics_dashboard(comparison: dict, evaluations: list):
+    """Render a basic metrics dashboard without plotly charts."""
+    st.markdown("### Vendor Performance Summary")
+
+    # Overall comparison table
+    st.markdown("#### Total Scores")
+    for eval_result in sorted(evaluations, key=lambda x: x.get("total_score", 0), reverse=True):
+        vendor_name = eval_result.get("supplier_name", "Unknown")
+        total_score = eval_result.get("total_score", 0)
+        grade = eval_result.get("grade", "N/A")
+
+        # Progress bar visualization
+        st.markdown(f"**{vendor_name}**: {total_score:.1f}/100 ({grade})")
+        st.progress(min(total_score / 100, 1.0))
+
+    st.markdown("---")
+    st.markdown("#### Criterion Scores")
+
+    if evaluations and evaluations[0].get("criterion_scores"):
+        criteria = evaluations[0]["criterion_scores"]
+
+        for criterion_idx, criterion in enumerate(criteria):
+            criterion_name = criterion.get("criterion_name", f"Criterion {criterion_idx + 1}")
+            criterion_weight = criterion.get("weight", 0)
+
+            st.markdown(f"**{criterion_name}** (Weight: {criterion_weight:.1f}%)")
+
+            for eval_result in evaluations:
+                vendor_name = eval_result.get("supplier_name", "Unknown")
+                criterion_scores = eval_result.get("criterion_scores", [])
+
+                if criterion_idx < len(criterion_scores):
+                    score = criterion_scores[criterion_idx].get("raw_score", 0)
+                    col1, col2 = st.columns([3, 1])
+                    with col1:
+                        st.progress(min(score / 100, 1.0))
+                    with col2:
+                        st.write(f"{vendor_name[:15]}: {score:.1f}")
+
+
+def render_comparison_overview(comparison: dict, evaluations: list):
+    """Render the comparison overview tab."""
+    st.subheader("📊 Multi-Vendor Comparison")
+
+    # Comparison insights
+    insights = comparison.get("comparison_insights", [])
+    if insights:
+        st.markdown("### Key Insights")
+        for insight in insights:
+            st.markdown(f"• {insight}")
+
+    # Winner summary
+    winner_summary = comparison.get("winner_summary", "")
+    if winner_summary:
+        st.markdown("### Winner Summary")
+        st.info(winner_summary)
+
+    # Risk comparison
+    risk_comparison = comparison.get("risk_comparison", "")
+    if risk_comparison:
+        st.markdown("### Risk Assessment")
+        st.warning(risk_comparison)
+
+    # Criterion comparisons
+    criterion_comparisons = comparison.get("criterion_comparisons", [])
+    if criterion_comparisons:
+        st.markdown("### Performance by Criterion")
+
+        for cc in criterion_comparisons:
+            with st.expander(f"**{cc.get('criterion_name', 'Unknown')}** (Weight: {cc.get('weight', 0):.1f}%)"):
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Best Performer", cc.get("best_vendor", "N/A"))
+                with col2:
+                    st.metric("Score Range", cc.get("score_range", "N/A"))
+                st.caption(cc.get("insights", ""))
+
+
+def render_individual_reports(evaluations: list):
+    """Render individual vendor reports."""
+    st.subheader("📋 Individual Vendor Reports")
+
+    for i, eval_result in enumerate(evaluations):
+        vendor_name = eval_result.get("supplier_name", f"Vendor {i+1}")
+        proposal_file = eval_result.get("_proposal_file", "Unknown")
+        total_score = eval_result.get("total_score", 0)
+        grade = eval_result.get("grade", "N/A")
+
+        with st.expander(f"**{vendor_name}** - Score: {total_score:.1f} ({grade})", expanded=i==0):
+            # Score summary
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Total Score", f"{total_score:.1f}")
+            with col2:
+                st.metric("Grade", grade)
+            with col3:
+                st.metric("File", proposal_file[:25] + "..." if len(proposal_file) > 25 else proposal_file)
+
+            # Criterion scores with justifications
+            st.markdown("#### Criterion Scores & Justifications")
+            criterion_scores = eval_result.get("criterion_scores", [])
+            for cs in criterion_scores:
+                score_pct = cs.get("raw_score", 0)
+                bar_color = "🟢" if score_pct >= 80 else "🟡" if score_pct >= 60 else "🟠" if score_pct >= 40 else "🔴"
+                criterion_name = cs.get('criterion_name', 'Unknown')
+                weighted_score = cs.get('weighted_score', 0)
+                justification = cs.get('justification', '')
+
+                # Show criterion score with expandable justification
+                with st.container():
+                    st.markdown(f"{bar_color} **{criterion_name}**: {score_pct:.1f}/100 (weighted: {weighted_score:.2f})")
+                    if justification:
+                        with st.expander("📝 View Justification", expanded=False):
+                            st.markdown(justification)
+
+                    # Show strengths and gaps for this criterion if available
+                    strengths = cs.get('strengths', [])
+                    gaps = cs.get('gaps', [])
+                    if strengths or gaps:
+                        col_s, col_g = st.columns(2)
+                        with col_s:
+                            if strengths:
+                                st.markdown("**Strengths:**")
+                                for s in strengths[:3]:
+                                    st.markdown(f"  ✅ {s}")
+                        with col_g:
+                            if gaps:
+                                st.markdown("**Gaps:**")
+                                for g in gaps[:3]:
+                                    st.markdown(f"  ⚠️ {g}")
+                    st.markdown("---")
+
+            # Overall Strengths and weaknesses
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown("#### Overall Strengths")
+                for s in eval_result.get("overall_strengths", []):
+                    st.markdown(f"✅ {s}")
+            with col2:
+                st.markdown("#### Overall Weaknesses")
+                for w in eval_result.get("overall_weaknesses", []):
+                    st.markdown(f"⚠️ {w}")
+
+            # Executive summary
+            st.markdown("#### Executive Summary")
+            st.markdown(eval_result.get("executive_summary", "No summary available."))
+
+
+def render_detailed_scores(evaluations: list):
+    """Render detailed score comparison table."""
+    st.subheader("📈 Detailed Score Comparison")
+
+    if not evaluations:
+        st.warning("No evaluations available.")
+        return
+
+    # Build comparison data
+    criteria = []
+    if evaluations[0].get("criterion_scores"):
+        criteria = [cs.get("criterion_name", cs.get("criterion_id", f"C-{i}"))
+                   for i, cs in enumerate(evaluations[0]["criterion_scores"])]
+
+    # Create comparison table data
+    table_data = []
+    for criterion_idx, criterion_name in enumerate(criteria):
+        row = {"Criterion": criterion_name}
+        for eval_result in evaluations:
+            vendor_name = eval_result.get("supplier_name", "Unknown")[:15]
+            scores = eval_result.get("criterion_scores", [])
+            if criterion_idx < len(scores):
+                row[vendor_name] = f"{scores[criterion_idx].get('raw_score', 0):.1f}"
+            else:
+                row[vendor_name] = "N/A"
+        table_data.append(row)
+
+    # Add total row
+    total_row = {"Criterion": "**TOTAL SCORE**"}
+    for eval_result in evaluations:
+        vendor_name = eval_result.get("supplier_name", "Unknown")[:15]
+        total_row[vendor_name] = f"**{eval_result.get('total_score', 0):.1f}**"
+    table_data.append(total_row)
+
+    st.table(table_data)
+
+
+def render_export_options(comparison: dict, evaluations: list):
+    """Render export options for reports."""
+    st.subheader("📥 Export Reports")
+
+    # Full Analysis Report (with comparison)
+    st.markdown("### 📑 Full Analysis Report")
+    st.markdown("Complete report including comparison, rankings, and all vendor details.")
+
+    if comparison and evaluations:
+        full_report = generate_full_analysis_report(comparison, evaluations)
+        if full_report:
+            st.download_button(
+                label="📑 Download Full Analysis Report (Word)",
+                data=full_report,
+                file_name="rfp_full_analysis_report.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                use_container_width=True,
+                key="full_analysis_report"
+            )
+        else:
+            st.caption("Word export not available. Install python-docx with: pip install python-docx")
+
+    st.markdown("---")
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.markdown("### 📊 CSV Comparison")
+        if comparison and evaluations:
+            comparison_agent = ComparisonAgent()
+            csv_content = comparison_agent.generate_csv_report(comparison, evaluations)
+            st.download_button(
+                label="📊 Download CSV",
+                data=csv_content,
+                file_name="vendor_comparison.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+
+    with col2:
+        st.markdown("### 📋 JSON Data")
+        full_data = {
+            "comparison": comparison,
+            "evaluations": evaluations
+        }
+        st.download_button(
+            label="📋 Download JSON",
+            data=json.dumps(full_data, indent=2),
+            file_name="evaluation_data.json",
+            mime="application/json",
+            use_container_width=True
+        )
+
+    with col3:
+        st.markdown("### 📄 Individual Reports")
+        st.caption("Detailed Word report for each vendor")
+
+    # Individual vendor reports in a separate section
+    st.markdown("### 📄 Individual Vendor Reports (Word)")
+    st.markdown("Detailed reports with criterion justifications for each vendor.")
+
+    vendor_cols = st.columns(min(len(evaluations), 4))
+    for i, eval_result in enumerate(evaluations):
+        col_idx = i % min(len(evaluations), 4)
+        with vendor_cols[col_idx]:
+            vendor_name = eval_result.get("supplier_name", f"Vendor_{i+1}").replace(" ", "_")
+            word_doc = generate_word_report(eval_result)
+            if word_doc:
+                st.download_button(
+                    label=f"📄 {vendor_name[:20]}",
+                    data=word_doc,
+                    file_name=f"report_{vendor_name}.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    use_container_width=True,
+                    key=f"word_{i}"
+                )
+            else:
+                st.caption(f"Not available for {vendor_name[:15]}")
