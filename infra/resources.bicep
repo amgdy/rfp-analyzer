@@ -27,7 +27,7 @@ var defaultOpenAiDeployments = [
     }
     sku: {
       name: 'GlobalStandard'
-      capacity: 100
+      capacity: 300
     }
   }
   {
@@ -39,7 +39,7 @@ var defaultOpenAiDeployments = [
     }
     sku: {
       name: 'GlobalStandard'
-      capacity: 100
+      capacity: 300
     }
   }
   {
@@ -51,7 +51,7 @@ var defaultOpenAiDeployments = [
     }
     sku: {
       name: 'GlobalStandard'
-      capacity: 100
+      capacity: 300
     }
   }
   {
