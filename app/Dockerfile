@@ -2,7 +2,6 @@
 # RFP Analyzer - Dockerfile
 # =============================================================================
 # Multi-stage build for optimized image size
-# Includes WeasyPrint dependencies for PDF export
 
 # -----------------------------------------------------------------------------
 # Stage 1: Build stage with uv for fast dependency installation
@@ -18,23 +17,13 @@ WORKDIR /app
 # Copy dependency files first for better caching
 COPY pyproject.toml uv.lock ./
 
-# Install dependencies (including PDF export extras)
-RUN uv sync --frozen --no-dev --all-extras
+# Install dependencies
+RUN uv sync --frozen --no-dev
 
 # -----------------------------------------------------------------------------
 # Stage 2: Runtime stage
 # -----------------------------------------------------------------------------
 FROM python:3.14-slim AS runtime
-
-# Install system dependencies for WeasyPrint (PDF export)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libpango-1.0-0 \
-    libpangocairo-1.0-0 \
-    libgdk-pixbuf-2.0-0 \
-    libffi-dev \
-    shared-mime-info \
-    && rm -rf /var/lib/apt/lists/* \
-    && apt-get clean
 
 # Create non-root user for security
 RUN useradd --create-home --shell /bin/bash appuser

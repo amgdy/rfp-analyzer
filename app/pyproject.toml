@@ -19,12 +19,6 @@ dependencies = [
     "plotly>=6.6.0",
 ]
 
-[project.optional-dependencies]
-pdf = [
-    "weasyprint>=68.1",
-    "markdown>=3.10.2",
-]
-
 [tool.uv]
 prerelease = "allow"
 

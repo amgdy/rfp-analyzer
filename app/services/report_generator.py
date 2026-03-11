@@ -1,136 +1,11 @@
 """Report generation functions for RFP Analyzer."""
 
-import io
 import logging
 
 from .utils import format_duration
 from .logging_config import get_logger
 
-# Optional PDF support
-try:
-    from weasyprint import HTML, CSS
-    PDF_AVAILABLE = True
-except (ImportError, OSError):
-    # ImportError: weasyprint not installed
-    # OSError: weasyprint installed but GTK libraries missing (common on Windows)
-    PDF_AVAILABLE = False
-
-try:
-    import markdown
-    MARKDOWN_AVAILABLE = True
-except ImportError:
-    MARKDOWN_AVAILABLE = False
-
 logger = get_logger(__name__)
-
-
-def generate_pdf_from_markdown(markdown_content: str, title: str = "RFP Score Report") -> bytes | None:
-    """Generate PDF from markdown content.
-
-    Args:
-        markdown_content: The markdown content to convert
-        title: Title for the PDF document
-
-    Returns:
-        PDF bytes if successful, None if PDF generation is not available
-    """
-    if not PDF_AVAILABLE or not MARKDOWN_AVAILABLE:
-        return None
-
-    try:
-        # Convert markdown to HTML
-        html_content = markdown.markdown(
-            markdown_content,
-            extensions=['tables', 'fenced_code', 'toc']
-        )
-
-        # CSS styling for the PDF
-        css = CSS(string='''
-            @page {
-                size: A4;
-                margin: 2cm;
-            }
-            body {
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-                font-size: 11pt;
-                line-height: 1.6;
-                color: #333;
-            }
-            h1 {
-                color: #1a1a1a;
-                border-bottom: 2px solid #0066cc;
-                padding-bottom: 10px;
-                font-size: 24pt;
-            }
-            h2 {
-                color: #0066cc;
-                margin-top: 20px;
-                font-size: 18pt;
-            }
-            h3 {
-                color: #333;
-                font-size: 14pt;
-            }
-            table {
-                width: 100%;
-                border-collapse: collapse;
-                margin: 15px 0;
-                font-size: 10pt;
-            }
-            th, td {
-                border: 1px solid #ddd;
-                padding: 8px;
-                text-align: left;
-            }
-            th {
-                background-color: #0066cc;
-                color: white;
-            }
-            tr:nth-child(even) {
-                background-color: #f9f9f9;
-            }
-            code {
-                background-color: #f4f4f4;
-                padding: 2px 6px;
-                border-radius: 3px;
-                font-family: "Courier New", monospace;
-                font-size: 10pt;
-            }
-            ul, ol {
-                margin-left: 20px;
-            }
-            li {
-                margin-bottom: 5px;
-            }
-            .score-excellent { color: #28a745; }
-            .score-good { color: #17a2b8; }
-            .score-average { color: #ffc107; }
-            .score-poor { color: #dc3545; }
-        ''')
-
-        # Wrap HTML with proper structure
-        full_html = f'''
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="UTF-8">
-            <title>{title}</title>
-        </head>
-        <body>
-            {html_content}
-        </body>
-        </html>
-        '''
-
-        # Generate PDF
-        pdf_buffer = io.BytesIO()
-        HTML(string=full_html).write_pdf(pdf_buffer, stylesheets=[css])
-        pdf_buffer.seek(0)
-        return pdf_buffer.getvalue()
-
-    except Exception as e:
-        logger.error(f"Failed to generate PDF: {e}")
-        return None
 
 
 def generate_score_report_v2(results: dict) -> str:
@@ -161,7 +36,7 @@ def generate_score_report_v2(results: dict) -> str:
         "B": "🔵 **GOOD**",
         "C": "🟡 **ACCEPTABLE**",
         "D": "🟠 **BELOW AVERAGE**",
-        "F": "🔴 **POOR**"
+        "F": "🔴 **POOR**",
     }
     grade_badge = grade_badges.get(grade, "⚪ **UNKNOWN**")
 
@@ -199,9 +74,9 @@ def generate_score_report_v2(results: dict) -> str:
 
 ## 🔍 Extracted Criteria Summary
 
-**RFP Summary:** {extracted.get('rfp_summary', 'N/A')}
+**RFP Summary:** {extracted.get("rfp_summary", "N/A")}
 
-**Criteria Count:** {extracted.get('criteria_count', len(extracted.get('criteria', [])))}
+**Criteria Count:** {extracted.get("criteria_count", len(extracted.get("criteria", [])))}
 
 | ID | Criterion | Category | Weight |
 |----|-----------|----------|--------|
@@ -237,7 +112,9 @@ def generate_score_report_v2(results: dict) -> str:
         else:
             indicator = "🔴"
 
-        report += f"| {indicator} {name} | {weight:.1f}% | {raw:.1f} | **{weighted:.2f}** |\n"
+        report += (
+            f"| {indicator} {name} | {weight:.1f}% | {raw:.1f} | **{weighted:.2f}** |\n"
+        )
 
     # Add total row
     total_weighted = sum(cs.get("weighted_score", 0) for cs in criterion_scores)
@@ -365,9 +242,9 @@ def generate_score_report_v2(results: dict) -> str:
     # Add timing metadata if available
     metadata = results.get("_metadata", {})
     if metadata:
-        phase1 = format_duration(metadata.get('phase1_criteria_extraction_seconds', 0))
-        phase2 = format_duration(metadata.get('phase2_proposal_scoring_seconds', 0))
-        total_eval = format_duration(metadata.get('total_duration_seconds', 0))
+        phase1 = format_duration(metadata.get("phase1_criteria_extraction_seconds", 0))
+        phase2 = format_duration(metadata.get("phase2_proposal_scoring_seconds", 0))
+        total_eval = format_duration(metadata.get("total_duration_seconds", 0))
 
         report += f"""
 ---
@@ -379,8 +256,8 @@ def generate_score_report_v2(results: dict) -> str:
 | **Criteria Extraction (Agent 1)** | {phase1} |
 | **Proposal Scoring (Agent 2)** | {phase2} |
 | **Total Evaluation Time** | {total_eval} |
-| **Model Deployment** | {metadata.get('model_deployment', 'N/A')} |
-| **Analysis Depth** | {metadata.get('reasoning_effort', 'N/A')} |
+| **Model Deployment** | {metadata.get("model_deployment", "N/A")} |
+| **Analysis Depth** | {metadata.get("reasoning_effort", "N/A")} |
 """
 
     return report
@@ -455,7 +332,11 @@ def generate_score_report(results: dict) -> str:
         req_text = req.get("requirement_text", "")
         eval_stage = req.get("evaluation_stage", "Technical")
         target_val = req.get("target_value", "")
-        response_val = req.get("response_value", "")[:50] + "..." if len(req.get("response_value", "")) > 50 else req.get("response_value", "")
+        response_val = (
+            req.get("response_value", "")[:50] + "..."
+            if len(req.get("response_value", "")) > 50
+            else req.get("response_value", "")
+        )
         max_score = req.get("maximum_score", 20)
         score = req.get("score", 0)
         weight = req.get("weight", 14.0)
@@ -464,10 +345,24 @@ def generate_score_report(results: dict) -> str:
         report += f"| **{req_id}. {req_name}** | {req_text} | {eval_stage} | {target_val} | {response_val} | {max_score} | **{score:.2f}** | {weight:.0f}% | **{weighted_score:.2f}** |\n"
 
     # Add totals row
-    total_max = sum(req.get("maximum_score", 20) for req in requirements) if requirements else 100
-    total_score = sum(req.get("score", 0) for req in requirements) if requirements else requirement_score
-    total_weight = sum(req.get("weight", 14.0) for req in requirements) if requirements else 70
-    total_weighted = sum(req.get("weighted_score", 0) for req in requirements) if requirements else composite_score
+    total_max = (
+        sum(req.get("maximum_score", 20) for req in requirements)
+        if requirements
+        else 100
+    )
+    total_score = (
+        sum(req.get("score", 0) for req in requirements)
+        if requirements
+        else requirement_score
+    )
+    total_weight = (
+        sum(req.get("weight", 14.0) for req in requirements) if requirements else 70
+    )
+    total_weighted = (
+        sum(req.get("weighted_score", 0) for req in requirements)
+        if requirements
+        else composite_score
+    )
 
     report += f"| **TOTAL** | | | | | **{total_max}** | **{total_score:.2f}** | **{total_weight:.0f}%** | **{total_weighted:.2f}** |\n"
 
@@ -579,8 +474,8 @@ def generate_score_report(results: dict) -> str:
     # Add timing metadata if available
     metadata = results.get("_metadata", {})
     if metadata:
-        api_duration = format_duration(metadata.get('api_call_duration_seconds', 0))
-        total_eval_duration = format_duration(metadata.get('total_duration_seconds', 0))
+        api_duration = format_duration(metadata.get("api_call_duration_seconds", 0))
+        total_eval_duration = format_duration(metadata.get("total_duration_seconds", 0))
         report += f"""
 ---
 
@@ -588,9 +483,9 @@ def generate_score_report(results: dict) -> str:
 
 | Metric | Value |
 |--------|-------|
-| **Evaluation Timestamp** | {metadata.get('evaluation_timestamp', 'N/A')} |
-| **Model Deployment** | {metadata.get('model_deployment', 'N/A')} |
-| **Analysis Depth** | {metadata.get('reasoning_effort', 'N/A')} |
+| **Evaluation Timestamp** | {metadata.get("evaluation_timestamp", "N/A")} |
+| **Model Deployment** | {metadata.get("model_deployment", "N/A")} |
+| **Analysis Depth** | {metadata.get("reasoning_effort", "N/A")} |
 | **API Call Duration** | {api_duration} |
 | **Total Evaluation Time** | {total_eval_duration} |
 """

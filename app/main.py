@@ -12,6 +12,7 @@ from pathlib import Path
 
 # Initialize centralized logging FIRST (before other imports)
 from services.logging_config import setup_logging, get_logger
+
 setup_logging()  # Uses OTEL_LOGGING_ENABLED env var (default: False)
 
 from services.document_processor import ExtractionService
@@ -43,7 +44,7 @@ st.set_page_config(
     page_title="RFP Analyzer",
     page_icon="📄",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
 
 # Initialize session state

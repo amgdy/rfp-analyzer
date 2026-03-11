@@ -7,9 +7,6 @@ from services.utils import format_duration
 from services.report_generator import (
     generate_score_report,
     generate_score_report_v2,
-    generate_pdf_from_markdown,
-    PDF_AVAILABLE,
-    MARKDOWN_AVAILABLE,
 )
 from services.document_processor import ExtractionService
 from services.logging_config import get_logger
@@ -35,7 +32,7 @@ def render_step_indicator(current_step: int):
             # Completed
             circle = (
                 f'<div style="width:36px;height:36px;border-radius:50%;'
-                f'background:#4F46E5;color:#fff;display:flex;align-items:center;'
+                f"background:#4F46E5;color:#fff;display:flex;align-items:center;"
                 f'justify-content:center;font-size:18px;font-weight:700;">✓</div>'
             )
             label_style = "color:#4F46E5;font-weight:600;"
@@ -43,7 +40,7 @@ def render_step_indicator(current_step: int):
             # Active
             circle = (
                 f'<div style="width:36px;height:36px;border-radius:50%;'
-                f'background:#4F46E5;color:#fff;display:flex;align-items:center;'
+                f"background:#4F46E5;color:#fff;display:flex;align-items:center;"
                 f'justify-content:center;font-size:16px;font-weight:700;">{num}</div>'
             )
             label_style = "color:#4F46E5;font-weight:700;"
@@ -51,16 +48,16 @@ def render_step_indicator(current_step: int):
             # Upcoming
             circle = (
                 f'<div style="width:36px;height:36px;border-radius:50%;'
-                f'background:#E5E7EB;color:#9CA3AF;display:flex;align-items:center;'
+                f"background:#E5E7EB;color:#9CA3AF;display:flex;align-items:center;"
                 f'justify-content:center;font-size:16px;font-weight:600;">{num}</div>'
             )
             label_style = "color:#9CA3AF;font-weight:400;"
 
         step_html_parts.append(
             f'<div style="display:flex;flex-direction:column;align-items:center;gap:6px;">'
-            f'{circle}'
+            f"{circle}"
             f'<span style="font-size:13px;{label_style}">{label}</span>'
-            f'</div>'
+            f"</div>"
         )
 
     # Connector lines between steps
@@ -79,7 +76,7 @@ def render_step_indicator(current_step: int):
         html += part
         if i < len(step_html_parts) - 1:
             html += connector(i + 1 < current_step)
-    html += '</div>'
+    html += "</div>"
 
     st.markdown(html, unsafe_allow_html=True)
 
@@ -89,7 +86,7 @@ def render_sidebar():
     with st.sidebar:
         st.markdown(
             '<p style="font-size:1.5rem;font-weight:700;margin:0 0 4px 0;">'
-            '📄 RFP Analyzer</p>',
+            "📄 RFP Analyzer</p>",
             unsafe_allow_html=True,
         )
         st.caption("AI-Powered RFP Analysis")
@@ -99,16 +96,19 @@ def render_sidebar():
             with st.expander("🔧 Document Extraction", expanded=True):
                 service_options = {
                     ExtractionService.DOCUMENT_INTELLIGENCE: "Azure Document Intelligence",
-                    ExtractionService.CONTENT_UNDERSTANDING: "Azure Content Understanding"
+                    ExtractionService.CONTENT_UNDERSTANDING: "Azure Content Understanding",
                 }
 
                 service = st.radio(
                     "Extraction service:",
                     options=list(service_options.keys()),
-                    index=0 if st.session_state.extraction_service == ExtractionService.DOCUMENT_INTELLIGENCE else 1,
+                    index=0
+                    if st.session_state.extraction_service
+                    == ExtractionService.DOCUMENT_INTELLIGENCE
+                    else 1,
                     format_func=lambda x: service_options[x],
                     help="Choose the Azure service for document text extraction.",
-                    disabled=st.session_state.is_processing
+                    disabled=st.session_state.is_processing,
                 )
                 if service != st.session_state.extraction_service:
                     logger.info("Extraction service changed to: %s", service.value)
@@ -121,15 +121,17 @@ def render_sidebar():
                 depth_options = {
                     "low": "Standard (~5 mins)",
                     "medium": "Thorough (~10 mins)",
-                    "high": "Comprehensive (~15 mins)"
+                    "high": "Comprehensive (~15 mins)",
                 }
                 effort = st.radio(
                     "Analysis depth:",
                     options=["low", "medium", "high"],
-                    index=["low", "medium", "high"].index(st.session_state.reasoning_effort),
+                    index=["low", "medium", "high"].index(
+                        st.session_state.reasoning_effort
+                    ),
                     format_func=lambda x: depth_options[x],
                     help="Higher depth = more detailed analysis but longer processing time.",
-                    disabled=st.session_state.is_processing
+                    disabled=st.session_state.is_processing,
                 )
                 if effort != st.session_state.reasoning_effort:
                     logger.info("Analysis depth changed to: %s", effort)
@@ -157,7 +159,11 @@ def render_sidebar():
             st.divider()
 
             # Reset button
-            if st.button("🔄 Start Over", use_container_width=True, disabled=st.session_state.is_processing):
+            if st.button(
+                "🔄 Start Over",
+                use_container_width=True,
+                disabled=st.session_state.is_processing,
+            ):
                 logger.info("User initiated application reset")
                 st.session_state.step = 0
                 st.session_state.rfp_file = None
@@ -167,7 +173,9 @@ def render_sidebar():
                 st.session_state.evaluation_results = []
                 st.session_state.comparison_results = None
                 st.session_state.global_criteria = ""
-                st.session_state.extraction_service = ExtractionService.DOCUMENT_INTELLIGENCE
+                st.session_state.extraction_service = (
+                    ExtractionService.DOCUMENT_INTELLIGENCE
+                )
                 st.session_state.evaluation_mode = "individual"
                 st.session_state.reasoning_effort = "low"
                 st.session_state.extraction_queue = None
@@ -220,10 +228,10 @@ def render_results(results: dict):
     st.markdown("---")
     st.subheader("📥 Download Report")
 
-    response_id = results.get('response_id', 'report')
-    supplier_name = results.get('supplier_name', 'vendor').replace(' ', '_')
+    response_id = results.get("response_id", "report")
+    supplier_name = results.get("supplier_name", "vendor").replace(" ", "_")
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
 
     with col1:
         st.download_button(
@@ -232,7 +240,7 @@ def render_results(results: dict):
             file_name=f"rfp_score_report_{response_id}.md",
             mime="text/markdown",
             use_container_width=True,
-            help="Download the report as a Markdown file"
+            help="Download the report as a Markdown file",
         )
 
     with col2:
@@ -242,38 +250,8 @@ def render_results(results: dict):
             file_name=f"rfp_score_report_{response_id}.json",
             mime="application/json",
             use_container_width=True,
-            help="Download the raw data as JSON"
+            help="Download the raw data as JSON",
         )
-
-    with col3:
-        if PDF_AVAILABLE and MARKDOWN_AVAILABLE:
-            pdf_data = generate_pdf_from_markdown(
-                report_md,
-                title=f"RFP Score Report - {supplier_name}"
-            )
-            if pdf_data:
-                st.download_button(
-                    label="📑 Download PDF",
-                    data=pdf_data,
-                    file_name=f"rfp_score_report_{response_id}.pdf",
-                    mime="application/pdf",
-                    use_container_width=True,
-                    help="Download the report as a PDF file"
-                )
-            else:
-                st.button(
-                    "📑 PDF Generation Failed",
-                    disabled=True,
-                    use_container_width=True,
-                    help="PDF generation encountered an error"
-                )
-        else:
-            st.button(
-                "📑 PDF Not Available",
-                disabled=True,
-                use_container_width=True,
-                help="Install 'weasyprint' and 'markdown' packages to enable PDF export"
-            )
 
 
 def render_results_v2(results: dict):
@@ -291,7 +269,9 @@ def render_results_v2(results: dict):
     report_md = generate_score_report_v2(results)
 
     # Display report in tabs
-    tab1, tab2, tab3 = st.tabs(["📊 Score Report", "📋 Extracted Criteria", "📄 Raw Data"])
+    tab1, tab2, tab3 = st.tabs(
+        ["📊 Score Report", "📋 Extracted Criteria", "📄 Raw Data"]
+    )
 
     with tab1:
         st.markdown(report_md)
@@ -306,10 +286,10 @@ def render_results_v2(results: dict):
     st.markdown("---")
     st.subheader("📥 Download Report")
 
-    response_id = results.get('response_id', 'report')
-    supplier_name = results.get('supplier_name', 'vendor').replace(' ', '_')
+    response_id = results.get("response_id", "report")
+    supplier_name = results.get("supplier_name", "vendor").replace(" ", "_")
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
 
     with col1:
         st.download_button(
@@ -317,7 +297,7 @@ def render_results_v2(results: dict):
             data=report_md,
             file_name=f"rfp_score_report_v2_{response_id}.md",
             mime="text/markdown",
-            use_container_width=True
+            use_container_width=True,
         )
 
     with col2:
@@ -326,24 +306,8 @@ def render_results_v2(results: dict):
             data=json.dumps(results, indent=2),
             file_name=f"rfp_score_report_v2_{response_id}.json",
             mime="application/json",
-            use_container_width=True
+            use_container_width=True,
         )
-
-    with col3:
-        if PDF_AVAILABLE and MARKDOWN_AVAILABLE:
-            pdf_data = generate_pdf_from_markdown(report_md, title=f"RFP Score Report V2 - {supplier_name}")
-            if pdf_data:
-                st.download_button(
-                    label="📑 Download PDF",
-                    data=pdf_data,
-                    file_name=f"rfp_score_report_v2_{response_id}.pdf",
-                    mime="application/pdf",
-                    use_container_width=True
-                )
-            else:
-                st.button("📑 PDF Generation Failed", disabled=True, use_container_width=True)
-        else:
-            st.button("📑 PDF Not Available", disabled=True, use_container_width=True)
 
 
 def render_timing_summary_v2(durations: dict, results: dict):
@@ -371,7 +335,7 @@ def render_timing_summary_v2(durations: dict, results: dict):
             label="⚡ Parallel Total",
             value=format_duration(docs_parallel_total),
             delta=f"-{format_duration(time_saved)} saved" if time_saved > 1 else None,
-            delta_color="inverse"
+            delta_color="inverse",
         )
 
     # Row 2: AI Scoring phases
@@ -385,7 +349,7 @@ def render_timing_summary_v2(durations: dict, results: dict):
             label="🔍 3a. Criteria Extraction",
             value=format_duration(phase1_time),
             delta=f"{criteria_count} criteria" if criteria_count else None,
-            delta_color="off"
+            delta_color="off",
         )
 
     with col2:
@@ -402,18 +366,18 @@ def render_timing_summary_v2(durations: dict, results: dict):
             with col1:
                 st.markdown(f"""
                 **Evaluation Details:**
-                - Version: `{metadata.get('version', 'N/A')}`
-                - Type: `{metadata.get('evaluation_type', 'N/A')}`
-                - Timestamp: `{metadata.get('evaluation_timestamp', 'N/A')}`
-                - Model: `{metadata.get('model_deployment', 'N/A')}`
-                - Analysis Depth: `{metadata.get('reasoning_effort', 'N/A')}`
+                - Version: `{metadata.get("version", "N/A")}`
+                - Type: `{metadata.get("evaluation_type", "N/A")}`
+                - Timestamp: `{metadata.get("evaluation_timestamp", "N/A")}`
+                - Model: `{metadata.get("model_deployment", "N/A")}`
+                - Analysis Depth: `{metadata.get("reasoning_effort", "N/A")}`
                 """)
             with col2:
                 st.markdown(f"""
                 **Multi Agents Timing:**
-                - Criteria Extraction (Agent 1): `{format_duration(metadata.get('phase1_criteria_extraction_seconds', 0))}`
-                - Proposal Scoring (Agent 2): `{format_duration(metadata.get('phase2_proposal_scoring_seconds', 0))}`
-                - Criteria Found: `{metadata.get('criteria_count', 0)}`
+                - Criteria Extraction (Agent 1): `{format_duration(metadata.get("phase1_criteria_extraction_seconds", 0))}`
+                - Proposal Scoring (Agent 2): `{format_duration(metadata.get("phase2_proposal_scoring_seconds", 0))}`
+                - Criteria Found: `{metadata.get("criteria_count", 0)}`
                 - Time Saved (parallel docs): `{format_duration(time_saved)}`
                 """)
 
@@ -435,21 +399,33 @@ def render_score_summary_v2(results: dict):
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
-        st.metric(label="Supplier", value=supplier_name[:20] + "..." if len(supplier_name) > 20 else supplier_name)
+        st.metric(
+            label="Supplier",
+            value=supplier_name[:20] + "..."
+            if len(supplier_name) > 20
+            else supplier_name,
+        )
 
     with col2:
-        st.metric(label="Total Score", value=f"{total_score:.1f}/100", help="Weighted sum of all criterion scores")
+        st.metric(
+            label="Total Score",
+            value=f"{total_score:.1f}/100",
+            help="Weighted sum of all criterion scores",
+        )
 
     with col3:
         st.metric(label="Criteria Evaluated", value=str(criteria_count))
 
     with col4:
-        st.markdown(f"""
+        st.markdown(
+            f"""
             <div style="text-align: center; padding: 10px;">
                 <p style="font-size: 14px; color: gray; margin: 0;">Grade</p>
                 <p style="font-size: 32px; font-weight: bold; color: {grade_color}; margin: 5px 0;">{grade}</p>
             </div>
-        """, unsafe_allow_html=True)
+        """,
+            unsafe_allow_html=True,
+        )
 
     # Recommendation banner
     if "recommend" in recommendation.lower() and "not" not in recommendation.lower():
@@ -473,18 +449,24 @@ def render_extracted_criteria(results: dict):
         st.info(f"**RFP Summary:** {extracted.get('rfp_summary')}")
 
     if criteria:
-        st.markdown(f"**Total Criteria:** {len(criteria)} | **Total Weight:** {extracted.get('total_weight', 100)}%")
+        st.markdown(
+            f"**Total Criteria:** {len(criteria)} | **Total Weight:** {extracted.get('total_weight', 100)}%"
+        )
 
         # Display as a table
         criteria_data = []
         for c in criteria:
-            criteria_data.append({
-                "ID": c.get("criterion_id", ""),
-                "Name": c.get("name", ""),
-                "Category": c.get("category", ""),
-                "Weight": f"{c.get('weight', 0):.1f}%",
-                "Description": c.get("description", "")[:100] + "..." if len(c.get("description", "")) > 100 else c.get("description", "")
-            })
+            criteria_data.append(
+                {
+                    "ID": c.get("criterion_id", ""),
+                    "Name": c.get("name", ""),
+                    "Category": c.get("category", ""),
+                    "Weight": f"{c.get('weight', 0):.1f}%",
+                    "Description": c.get("description", "")[:100] + "..."
+                    if len(c.get("description", "")) > 100
+                    else c.get("description", ""),
+                }
+            )
 
         st.dataframe(criteria_data, use_container_width=True)
 
@@ -492,13 +474,13 @@ def render_extracted_criteria(results: dict):
         with st.expander("📋 Detailed Criteria Descriptions", expanded=False):
             for c in criteria:
                 st.markdown(f"""
-                ### {c.get('criterion_id', '')}. {c.get('name', '')} ({c.get('weight', 0):.1f}%)
+                ### {c.get("criterion_id", "")}. {c.get("name", "")} ({c.get("weight", 0):.1f}%)
 
-                **Category:** {c.get('category', 'N/A')}
+                **Category:** {c.get("category", "N/A")}
 
-                **Description:** {c.get('description', 'N/A')}
+                **Description:** {c.get("description", "N/A")}
 
-                **Evaluation Guidance:** {c.get('evaluation_guidance', 'N/A')}
+                **Evaluation Guidance:** {c.get("evaluation_guidance", "N/A")}
 
                 ---
                 """)
@@ -527,7 +509,7 @@ def render_timing_summary(durations: dict, results: dict):
         st.metric(
             label="📄 RFP Processing",
             value=format_duration(rfp_time),
-            help="Time to extract content from RFP document"
+            help="Time to extract content from RFP document",
         )
 
     with col2:
@@ -535,7 +517,7 @@ def render_timing_summary(durations: dict, results: dict):
         st.metric(
             label="📝 Proposal Processing",
             value=format_duration(proposal_time),
-            help="Time to extract content from Proposal document"
+            help="Time to extract content from Proposal document",
         )
 
     with col3:
@@ -544,8 +526,10 @@ def render_timing_summary(durations: dict, results: dict):
         st.metric(
             label="🧠 AI Scoring",
             value=format_duration(scoring_time),
-            delta=f"API: {format_duration(api_time)}" if api_time != scoring_time else None,
-            help="Time for AI reasoning and scoring"
+            delta=f"API: {format_duration(api_time)}"
+            if api_time != scoring_time
+            else None,
+            help="Time for AI reasoning and scoring",
         )
 
     with col4:
@@ -555,12 +539,14 @@ def render_timing_summary(durations: dict, results: dict):
             value=format_duration(total_time),
             delta=f"-{format_duration(time_saved)} saved" if time_saved > 1 else None,
             delta_color="inverse",
-            help="Total evaluation pipeline duration"
+            help="Total evaluation pipeline duration",
         )
 
     # Show parallel processing info
     if time_saved > 1:
-        st.success(f"⚡ **Parallel Processing:** Documents processed simultaneously in {format_duration(docs_parallel_total)} (saved {format_duration(time_saved)})")
+        st.success(
+            f"⚡ **Parallel Processing:** Documents processed simultaneously in {format_duration(docs_parallel_total)} (saved {format_duration(time_saved)})"
+        )
 
     # Additional metadata details
     if metadata:
@@ -569,14 +555,14 @@ def render_timing_summary(durations: dict, results: dict):
             with detail_col1:
                 st.markdown(f"""
                 **Evaluation Details:**
-                - Timestamp: `{metadata.get('evaluation_timestamp', 'N/A')}`
-                - Model: `{metadata.get('model_deployment', 'N/A')}`
-                - Analysis Depth: `{metadata.get('reasoning_effort', 'N/A')}`
+                - Timestamp: `{metadata.get("evaluation_timestamp", "N/A")}`
+                - Model: `{metadata.get("model_deployment", "N/A")}`
+                - Analysis Depth: `{metadata.get("reasoning_effort", "N/A")}`
                 """)
             with detail_col2:
-                api_duration = metadata.get('api_call_duration_seconds', 0)
-                parse_duration = metadata.get('parse_duration_seconds', 0)
-                total_eval_duration = metadata.get('total_duration_seconds', 0)
+                api_duration = metadata.get("api_call_duration_seconds", 0)
+                parse_duration = metadata.get("parse_duration_seconds", 0)
+                total_eval_duration = metadata.get("total_duration_seconds", 0)
                 st.markdown(f"""
                 **Duration Breakdown:**
                 - API Call: `{format_duration(api_duration)}`
@@ -613,21 +599,23 @@ def render_score_summary(results: dict):
     with col1:
         st.metric(
             label="Supplier",
-            value=supplier_name[:20] + "..." if len(supplier_name) > 20 else supplier_name
+            value=supplier_name[:20] + "..."
+            if len(supplier_name) > 20
+            else supplier_name,
         )
 
     with col2:
         st.metric(
             label="Requirement Score",
             value=f"{requirement_score:.2f}",
-            help="Total score out of 100"
+            help="Total score out of 100",
         )
 
     with col3:
         st.metric(
             label="Composite Score",
             value=f"{composite_score:.2f}",
-            help="Weighted score out of 70"
+            help="Weighted score out of 70",
         )
 
     with col4:
@@ -638,7 +626,7 @@ def render_score_summary(results: dict):
                 <p style="font-size: 16px; font-weight: bold; color: {color}; margin: 5px 0;">{recommendation}</p>
             </div>
             """,
-            unsafe_allow_html=True
+            unsafe_allow_html=True,
         )
 
     st.markdown("---")

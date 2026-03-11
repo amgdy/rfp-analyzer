@@ -5,13 +5,13 @@ import pytest
 from services.report_generator import (
     generate_score_report_v2,
     generate_score_report,
-    generate_pdf_from_markdown,
 )
 
 
 # ============================================================================
 # Fixtures / helpers
 # ============================================================================
+
 
 def _make_v2_results(**overrides) -> dict:
     """Build a minimal V2 evaluation result dict."""
@@ -36,7 +36,7 @@ def _make_v2_results(**overrides) -> dict:
                     "description": "Tech skills",
                     "category": "Technical",
                     "weight": 60.0,
-                    "evaluation_guidance": "Score tech"
+                    "evaluation_guidance": "Score tech",
                 },
                 {
                     "criterion_id": "C-2",
@@ -44,10 +44,10 @@ def _make_v2_results(**overrides) -> dict:
                     "description": "Pricing",
                     "category": "Financial",
                     "weight": 40.0,
-                    "evaluation_guidance": "Lower cost"
-                }
+                    "evaluation_guidance": "Lower cost",
+                },
             ],
-            "extraction_notes": "Extracted 2 criteria"
+            "extraction_notes": "Extracted 2 criteria",
         },
         "criterion_scores": [
             {
@@ -59,7 +59,7 @@ def _make_v2_results(**overrides) -> dict:
                 "evidence": "Strong technical proposal",
                 "justification": "Exceeds requirements",
                 "strengths": ["Expert team"],
-                "gaps": []
+                "gaps": [],
             },
             {
                 "criterion_id": "C-2",
@@ -70,8 +70,8 @@ def _make_v2_results(**overrides) -> dict:
                 "evidence": "Competitive pricing",
                 "justification": "Within budget",
                 "strengths": ["Good value"],
-                "gaps": ["No volume discounts"]
-            }
+                "gaps": ["No volume discounts"],
+            },
         ],
         "executive_summary": "Acme Corp is a strong candidate.",
         "overall_strengths": ["Strong team", "Good pricing"],
@@ -87,8 +87,8 @@ def _make_v2_results(**overrides) -> dict:
             "phase2_proposal_scoring_seconds": 90.3,
             "criteria_count": 2,
             "model_deployment": "gpt-4.1",
-            "reasoning_effort": "high"
-        }
+            "reasoning_effort": "high",
+        },
     }
     base.update(overrides)
     return base
@@ -117,13 +117,13 @@ def _make_v1_results(**overrides) -> dict:
                 "score": 15.0,
                 "weight": 14.0,
                 "weighted_score": 10.5,
-                "comments": "Well known agency"
+                "comments": "Well known agency",
             }
         ],
         "strengths": ["Good reputation"],
         "weaknesses": ["Limited portfolio"],
         "recommendations": ["Request more references"],
-        "summary": "Beta LLC meets basic requirements."
+        "summary": "Beta LLC meets basic requirements.",
     }
     base.update(overrides)
     return base
@@ -132,6 +132,7 @@ def _make_v1_results(**overrides) -> dict:
 # ============================================================================
 # generate_score_report_v2 tests
 # ============================================================================
+
 
 class TestGenerateScoreReportV2:
     """Tests for generate_score_report_v2."""
@@ -202,6 +203,7 @@ class TestGenerateScoreReportV2:
 # generate_score_report (V1) tests
 # ============================================================================
 
+
 class TestGenerateScoreReport:
     """Tests for generate_score_report (V1 format)."""
 
@@ -241,22 +243,3 @@ class TestGenerateScoreReport:
         results = _make_v1_results(composite_score=25.0)
         report = generate_score_report(results)
         assert "NOT RECOMMENDED" in report
-
-
-# ============================================================================
-# generate_pdf_from_markdown tests
-# ============================================================================
-
-class TestGeneratePdfFromMarkdown:
-    """Tests for generate_pdf_from_markdown."""
-
-    def test_returns_none_when_unavailable(self):
-        # PDF generation depends on weasyprint being installed.
-        # In test environments it may or may not be available.
-        result = generate_pdf_from_markdown("# Test")
-        # Either returns bytes or None
-        assert result is None or isinstance(result, bytes)
-
-    def test_handles_empty_content(self):
-        result = generate_pdf_from_markdown("")
-        assert result is None or isinstance(result, bytes)

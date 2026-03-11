@@ -14,7 +14,7 @@ from azure.identity import DefaultAzureCredential
 from azure.storage.blob import (
     BlobServiceClient,
     generate_container_sas,
-    ContainerSasPermissions
+    ContainerSasPermissions,
 )
 from azure.storage.blob.aio import ContainerClient
 
@@ -33,7 +33,6 @@ class ReferenceDocItem:
 
 
 class AzureContentUnderstandingClient:
-
     PREBUILT_DOCUMENT_ANALYZER_ID: str = "prebuilt-documentSearch"
     OCR_RESULT_FILE_SUFFIX: str = ".result.json"
     LABEL_FILE_SUFFIX: str = ".labels.json"
@@ -98,16 +97,22 @@ class AzureContentUnderstandingClient:
 
         self._headers = self._get_headers(subscription_key, token, x_ms_useragent)
 
-    def _get_analyzer_url(self, endpoint: str, api_version: str, analyzer_id: str) -> str:
+    def _get_analyzer_url(
+        self, endpoint: str, api_version: str, analyzer_id: str
+    ) -> str:
         return f"{endpoint}/contentunderstanding/analyzers/{analyzer_id}?api-version={api_version}"  # noqa
 
     def _get_analyzer_list_url(self, endpoint: str, api_version: str) -> str:
         return f"{endpoint}/contentunderstanding/analyzers?api-version={api_version}"
 
-    def _get_analyze_url(self, endpoint: str, api_version: str, analyzer_id: str) -> str:
+    def _get_analyze_url(
+        self, endpoint: str, api_version: str, analyzer_id: str
+    ) -> str:
         return f"{endpoint}/contentunderstanding/analyzers/{analyzer_id}:analyze?api-version={api_version}"  # noqa
 
-    def _get_analyze_binary_url(self, endpoint: str, api_version: str, analyzer_id: str) -> str:
+    def _get_analyze_binary_url(
+        self, endpoint: str, api_version: str, analyzer_id: str
+    ) -> str:
         return f"{endpoint}/contentunderstanding/analyzers/{analyzer_id}:analyzeBinary?api-version={api_version}"  # noqa
 
     def _get_training_data_config(
@@ -118,21 +123,27 @@ class AzureContentUnderstandingClient:
             "kind": "blob",
             "prefix": storage_container_path_prefix,
         }
-    
+
     def _get_pro_mode_reference_docs_config(
         self, storage_container_sas_url: str, storage_container_path_prefix: str
     ) -> List[Dict[str, str]]:
-        return [{
-            "kind": "reference",
-            "containerUrl": storage_container_sas_url,
-            "prefix": storage_container_path_prefix,
-            "fileListPath": self.KNOWLEDGE_SOURCE_LIST_FILE_NAME,
-        }]
+        return [
+            {
+                "kind": "reference",
+                "containerUrl": storage_container_sas_url,
+                "prefix": storage_container_path_prefix,
+                "fileListPath": self.KNOWLEDGE_SOURCE_LIST_FILE_NAME,
+            }
+        ]
 
-    def _get_classifier_url(self, endpoint: str, api_version: str, classifier_id: str) -> str:
+    def _get_classifier_url(
+        self, endpoint: str, api_version: str, classifier_id: str
+    ) -> str:
         return f"{endpoint}/contentunderstanding/classifiers/{classifier_id}?api-version={api_version}"
 
-    def _get_classify_url(self, endpoint: str, api_version: str, classifier_id: str) -> str:
+    def _get_classify_url(
+        self, endpoint: str, api_version: str, classifier_id: str
+    ) -> str:
         return f"{endpoint}/contentunderstanding/classifiers/{classifier_id}:classify?api-version={api_version}"
 
     def _get_defaults_url(self, endpoint: str, api_version: str) -> str:
@@ -156,21 +167,21 @@ class AzureContentUnderstandingClient:
         )
         headers["x-ms-useragent"] = x_ms_useragent
         return headers
-    
+
     def _raise_for_status_with_detail(self, response: Response) -> None:
         """
         Raises HTTPError with detailed error information from the response.
-        
+
         Args:
             response: The HTTP response object to check
-            
+
         Raises:
             requests.exceptions.HTTPError: If the response status indicates an error,
                 with additional context from the response body
         """
         if response.ok:
             return
-        
+
         try:
             # Try to extract error details from response body
             error_detail = ""
@@ -181,14 +192,16 @@ class AzureContentUnderstandingClient:
                     error_code = error_info.get("code", "Unknown")
                     error_message = error_info.get("message", "No message provided")
                     error_detail = f"\n  Error Code: {error_code}\n  Error Message: {error_message}"
-                    
+
                     # Include additional details if available
                     if "details" in error_info:
                         error_detail += f"\n  Details: {error_info['details']}"
                     if "innererror" in error_info:
                         error_detail += f"\n  Inner Error: {error_info['innererror']}"
                 else:
-                    error_detail = f"\n  Response Body: {json.dumps(error_json, indent=2)}"
+                    error_detail = (
+                        f"\n  Response Body: {json.dumps(error_json, indent=2)}"
+                    )
             except (ValueError, json.JSONDecodeError):
                 # If response is not JSON, include raw text
                 if response.text:
@@ -196,16 +209,18 @@ class AzureContentUnderstandingClient:
         except Exception:
             # If anything goes wrong parsing the error, just continue with basic error
             error_detail = ""
-        
+
         # Create detailed error message
         error_msg = f"{response.status_code} {response.reason} for url: {response.url}{error_detail}"
-        
+
         # Raise HTTPError with the detailed message
         http_error = requests.exceptions.HTTPError(error_msg, response=response)
         raise http_error
-    
+
     @staticmethod
-    def is_supported_doc_type_by_file_ext(file_ext: str, is_document: bool=False) -> bool:
+    def is_supported_doc_type_by_file_ext(
+        file_ext: str, is_document: bool = False
+    ) -> bool:
         """
         Checks if the given file extension is supported.
 
@@ -218,12 +233,15 @@ class AzureContentUnderstandingClient:
         """
         supported_types = (
             AzureContentUnderstandingClient.SUPPORTED_FILE_TYPES_DOCUMENT
-            if is_document else AzureContentUnderstandingClient.SUPPORTED_FILE_TYPES_DOCUMENT_TXT
+            if is_document
+            else AzureContentUnderstandingClient.SUPPORTED_FILE_TYPES_DOCUMENT_TXT
         )
         return file_ext.lower() in supported_types
-    
+
     @staticmethod
-    def is_supported_doc_type_by_file_path(file_path: Path, is_document: bool=False) -> bool:
+    def is_supported_doc_type_by_file_path(
+        file_path: Path, is_document: bool = False
+    ) -> bool:
         """
         Checks if the given file path has a supported file type.
 
@@ -237,7 +255,9 @@ class AzureContentUnderstandingClient:
         if not file_path.is_file():
             return False
         file_ext = file_path.suffix.lower()
-        return AzureContentUnderstandingClient.is_supported_doc_type_by_file_ext(file_ext, is_document)
+        return AzureContentUnderstandingClient.is_supported_doc_type_by_file_ext(
+            file_ext, is_document
+        )
 
     @staticmethod
     def generate_temp_container_sas_url(
@@ -262,15 +282,21 @@ class AzureContentUnderstandingClient:
         """
         if permissions is None:
             permissions = ContainerSasPermissions(read=True, list=True)
-        expiry_duration = timedelta(hours=expiry_hours or AzureContentUnderstandingClient.SAS_EXPIRY_HOURS)
+        expiry_duration = timedelta(
+            hours=expiry_hours or AzureContentUnderstandingClient.SAS_EXPIRY_HOURS
+        )
 
         account_url = f"https://{account_name}.blob.core.windows.net"
-        blob_service_client = BlobServiceClient(account_url=account_url, credential=DefaultAzureCredential())
+        blob_service_client = BlobServiceClient(
+            account_url=account_url, credential=DefaultAzureCredential()
+        )
 
         # Get user delegation key
         start_time = datetime.now(timezone.utc)
         expiry_time = start_time + expiry_duration
-        delegation_key = blob_service_client.get_user_delegation_key(start_time, expiry_time)
+        delegation_key = blob_service_client.get_user_delegation_key(
+            start_time, expiry_time
+        )
 
         sas_token = generate_container_sas(
             account_name=account_name,
@@ -304,40 +330,46 @@ class AzureContentUnderstandingClient:
         url = self._get_analyzer_list_url(self._endpoint, self._api_version)
         visited_urls = set()
         page_count = 0
-        
+
         while url:
             # Prevent infinite loops from circular pagination links
             if url in visited_urls:
-                raise RuntimeError(f"Circular pagination detected: {url} was already visited")
-            
+                raise RuntimeError(
+                    f"Circular pagination detected: {url} was already visited"
+                )
+
             visited_urls.add(url)
             page_count += 1
-            
+
             # Check page count after incrementing to properly enforce limit
             if page_count > self.MAX_PAGINATION_PAGES:
                 raise RuntimeError(
                     f"Maximum pagination limit ({self.MAX_PAGINATION_PAGES} pages) exceeded. "
                     f"This likely indicates a pagination loop or misconfiguration."
                 )
-            
+
             response = requests.get(url=url, headers=self._headers)
             self._raise_for_status_with_detail(response)
             response_json = response.json()
-            
+
             # Collect analyzers from current page
             analyzers = response_json.get("value", [])
             if not isinstance(analyzers, list):
                 # Include structure info without potentially sensitive response content
-                structure_keys = list(response_json.keys()) if isinstance(response_json, dict) else []
+                structure_keys = (
+                    list(response_json.keys())
+                    if isinstance(response_json, dict)
+                    else []
+                )
                 raise ValueError(
                     f"Expected 'value' to be a list, got {type(analyzers).__name__}. "
                     f"Response contains keys: {structure_keys}"
                 )
             all_analyzers.extend(analyzers)
-            
+
             # Get the next page URL, if it exists
             url = response_json.get("nextLink")
-        
+
         # Return in the same format as the original response
         return {"value": all_analyzers}
 
@@ -362,7 +394,9 @@ class AzureContentUnderstandingClient:
         self._raise_for_status_with_detail(response)
         return response.json()
 
-    def update_defaults(self, model_deployments: Dict[str, Optional[str]]) -> Dict[str, Any]:
+    def update_defaults(
+        self, model_deployments: Dict[str, Optional[str]]
+    ) -> Dict[str, Any]:
         """
         Updates the default model deployment mappings for the Content Understanding resource.
 
@@ -476,9 +510,11 @@ class AzureContentUnderstandingClient:
         ):  # noqa
             if not pro_mode_reference_docs_storage_container_path_prefix.endswith("/"):
                 pro_mode_reference_docs_storage_container_path_prefix += "/"
-            analyzer_template["knowledgeSources"] = self._get_pro_mode_reference_docs_config(
-                pro_mode_reference_docs_storage_container_sas_url,
-                pro_mode_reference_docs_storage_container_path_prefix,
+            analyzer_template["knowledgeSources"] = (
+                self._get_pro_mode_reference_docs_config(
+                    pro_mode_reference_docs_storage_container_sas_url,
+                    pro_mode_reference_docs_storage_container_path_prefix,
+                )
             )
 
         headers = {"Content-Type": "application/json"}
@@ -532,27 +568,25 @@ class AzureContentUnderstandingClient:
         """
         if not (url.startswith("https://") or url.startswith("http://")):
             raise ValueError("URL must start with http:// or https://")
-        
+
         # URL must be wrapped in inputs array
         data = {"inputs": [{"url": url}]}
         headers = {"Content-Type": "application/json"}
         headers.update(self._headers)
-        
+
         response = requests.post(
-            url=self._get_analyze_url(
-                self._endpoint, self._api_version, analyzer_id
-            ),
+            url=self._get_analyze_url(self._endpoint, self._api_version, analyzer_id),
             headers=headers,
             json=data,
         )
-        
+
         self._raise_for_status_with_detail(response)
-        self._logger.info(
-            f"Analyzing URL {url} with analyzer: {analyzer_id}"
-        )
+        self._logger.info(f"Analyzing URL {url} with analyzer: {analyzer_id}")
         return response
-    
-    def begin_analyze_binary_bytes(self, analyzer_id: str, file_bytes: bytes) -> Response:
+
+    def begin_analyze_binary_bytes(
+        self, analyzer_id: str, file_bytes: bytes
+    ) -> Response:
         """
         Begins the analysis of a single binary file using the specified analyzer.
         Uses the :analyzeBinary endpoint required by GA API 2025-11-01.
@@ -569,7 +603,7 @@ class AzureContentUnderstandingClient:
         """
         headers = {"Content-Type": "application/octet-stream"}
         headers.update(self._headers)
-        
+
         response = requests.post(
             url=self._get_analyze_binary_url(
                 self._endpoint, self._api_version, analyzer_id
@@ -577,11 +611,9 @@ class AzureContentUnderstandingClient:
             headers=headers,
             data=file_bytes,
         )
-        
+
         self._raise_for_status_with_detail(response)
-        self._logger.info(
-            f"Analyzing binary file with analyzer: {analyzer_id}"
-        )
+        self._logger.info(f"Analyzing binary file with analyzer: {analyzer_id}")
         return response
 
     def begin_analyze_binary(self, analyzer_id: str, file_location: str) -> Response:
@@ -603,13 +635,13 @@ class AzureContentUnderstandingClient:
         file_path = Path(file_location)
         if not file_path.exists() or not file_path.is_file():
             raise ValueError("File location must be a valid file path.")
-        
+
         with open(file_location, "rb") as file:
             file_bytes = file.read()
-        
+
         headers = {"Content-Type": "application/octet-stream"}
         headers.update(self._headers)
-        
+
         response = requests.post(
             url=self._get_analyze_binary_url(
                 self._endpoint, self._api_version, analyzer_id
@@ -617,43 +649,57 @@ class AzureContentUnderstandingClient:
             headers=headers,
             data=file_bytes,
         )
-        
+
         self._raise_for_status_with_detail(response)
         self._logger.info(
             f"Analyzing binary file {file_location} with analyzer: {analyzer_id}"
         )
         return response
-    
-    def get_prebuilt_document_analyze_result(self, file_location: str) -> Dict[str, Any]:
+
+    def get_prebuilt_document_analyze_result(
+        self, file_location: str
+    ) -> Dict[str, Any]:
         # Use begin_analyze_binary for single file analysis
         response = self.begin_analyze_binary(
             analyzer_id=self.PREBUILT_DOCUMENT_ANALYZER_ID,
             file_location=file_location,
         )
-        
+
         return self.poll_result(response, timeout_seconds=POLL_TIMEOUT_SECONDS)
-    
+
     async def _upload_file_to_blob(
         self, container_client: ContainerClient, file_path: str, target_blob_path: str
     ) -> None:
         with open(file_path, "rb") as data:
-            await container_client.upload_blob(name=target_blob_path, data=data, overwrite=True)
+            await container_client.upload_blob(
+                name=target_blob_path, data=data, overwrite=True
+            )
         self._logger.info(f"Uploaded file to {target_blob_path}")
 
     async def _upload_json_to_blob(
-        self, container_client: ContainerClient, data: Dict[str, Any], target_blob_path: str
+        self,
+        container_client: ContainerClient,
+        data: Dict[str, Any],
+        target_blob_path: str,
     ) -> None:
         json_str = json.dumps(data, indent=4)
-        json_bytes = json_str.encode('utf-8')
-        await container_client.upload_blob(name=target_blob_path, data=json_bytes, overwrite=True)
+        json_bytes = json_str.encode("utf-8")
+        await container_client.upload_blob(
+            name=target_blob_path, data=json_bytes, overwrite=True
+        )
         self._logger.info(f"Uploaded json to {target_blob_path}")
-    
+
     async def upload_jsonl_to_blob(
-        self, container_client: ContainerClient, data_list: List[Dict[str, Any]], target_blob_path: str
+        self,
+        container_client: ContainerClient,
+        data_list: List[Dict[str, Any]],
+        target_blob_path: str,
     ) -> None:
         jsonl_string = "\n".join(json.dumps(record) for record in data_list)
         jsonl_bytes = jsonl_string.encode("utf-8")
-        await container_client.upload_blob(name=target_blob_path, data=jsonl_bytes, overwrite=True)
+        await container_client.upload_blob(
+            name=target_blob_path, data=jsonl_bytes, overwrite=True
+        )
         self._logger.info(f"Uploaded jsonl to blob '{target_blob_path}'")
 
     async def generate_training_data_on_blob(
@@ -664,28 +710,42 @@ class AzureContentUnderstandingClient:
     ) -> None:
         if not storage_container_path_prefix.endswith("/"):
             storage_container_path_prefix += "/"
-        
-        async with ContainerClient.from_container_url(storage_container_sas_url) as container_client:
+
+        async with ContainerClient.from_container_url(
+            storage_container_sas_url
+        ) as container_client:
             for filename in os.listdir(training_docs_folder):
                 file_path = os.path.join(training_docs_folder, filename)
                 _, file_ext = os.path.splitext(filename)
                 if os.path.isfile(file_path) and (
-                        file_ext == "" or file_ext.lower() in self.SUPPORTED_FILE_TYPES_DOCUMENT):
+                    file_ext == ""
+                    or file_ext.lower() in self.SUPPORTED_FILE_TYPES_DOCUMENT
+                ):
                     # Training feature only supports Standard mode with document data
                     # Document files uploaded to AI Foundry will be convert to uuid without extension
                     label_filename = filename + self.LABEL_FILE_SUFFIX
                     label_path = os.path.join(training_docs_folder, label_filename)
                     ocr_result_filename = filename + self.OCR_RESULT_FILE_SUFFIX
-                    ocr_result_path = os.path.join(training_docs_folder, ocr_result_filename)
+                    ocr_result_path = os.path.join(
+                        training_docs_folder, ocr_result_filename
+                    )
                     if os.path.exists(label_path) and os.path.exists(ocr_result_path):
                         file_blob_path = storage_container_path_prefix + filename
                         label_blob_path = storage_container_path_prefix + label_filename
-                        ocr_result_blob_path = storage_container_path_prefix + ocr_result_filename
+                        ocr_result_blob_path = (
+                            storage_container_path_prefix + ocr_result_filename
+                        )
 
                         # Upload files
-                        await self._upload_file_to_blob(container_client, file_path, file_blob_path)
-                        await self._upload_file_to_blob(container_client, label_path, label_blob_path)
-                        await self._upload_file_to_blob(container_client, ocr_result_path, ocr_result_blob_path)
+                        await self._upload_file_to_blob(
+                            container_client, file_path, file_blob_path
+                        )
+                        await self._upload_file_to_blob(
+                            container_client, label_path, label_blob_path
+                        )
+                        await self._upload_file_to_blob(
+                            container_client, ocr_result_path, ocr_result_blob_path
+                        )
                         self._logger.info(f"Uploaded training data for {filename}")
                     else:
                         raise FileNotFoundError(
@@ -754,11 +814,15 @@ class AzureContentUnderstandingClient:
                         )
                     )
                 elif filename.endswith(self.OCR_RESULT_FILE_SUFFIX):
-                    original_filename = filename.replace(self.OCR_RESULT_FILE_SUFFIX, "")
+                    original_filename = filename.replace(
+                        self.OCR_RESULT_FILE_SUFFIX, ""
+                    )
                     if original_filename in filenames:
                         # skip result.json files corresponding to the file with supported document type
                         _, original_file_ext = os.path.splitext(original_filename)
-                        if self.is_supported_doc_type_by_file_ext(original_file_ext, is_document=True):
+                        if self.is_supported_doc_type_by_file_ext(
+                            original_file_ext, is_document=True
+                        ):
                             continue
                         else:
                             raise ValueError(
@@ -795,49 +859,86 @@ class AzureContentUnderstandingClient:
         """
         if not storage_container_path_prefix.endswith("/"):
             storage_container_path_prefix += "/"
-        
+
         resources = []
-        async with ContainerClient.from_container_url(storage_container_sas_url) as container_client:
+        async with ContainerClient.from_container_url(
+            storage_container_sas_url
+        ) as container_client:
             if not skip_analyze:
                 analyze_list = self._get_analyze_list(reference_docs_folder)
                 for analyze_item in analyze_list:
                     self._logger.info(f"Analyzing result for {analyze_item.filename}")
                     try:
-                        analyze_result = self.get_prebuilt_document_analyze_result(analyze_item.file_path)
+                        analyze_result = self.get_prebuilt_document_analyze_result(
+                            analyze_item.file_path
+                        )
                     except Exception as e:
                         self._logger.error(
                             f"Error of getting analyze result of '{analyze_item.filename}'. "
                             f"Please check the error message and consider retrying or removing this file."
-                            )
+                        )
                         raise e
-                    result_file_blob_path = storage_container_path_prefix + analyze_item.result_file_name
-                    file_blob_path = storage_container_path_prefix + analyze_item.filename
-                    await self._upload_json_to_blob(container_client, analyze_result, result_file_blob_path)
-                    await self._upload_file_to_blob(container_client, analyze_item.file_path, file_blob_path)
-                    resources.append({"file": analyze_item.filename, "resultFile": analyze_item.result_file_name})
+                    result_file_blob_path = (
+                        storage_container_path_prefix + analyze_item.result_file_name
+                    )
+                    file_blob_path = (
+                        storage_container_path_prefix + analyze_item.filename
+                    )
+                    await self._upload_json_to_blob(
+                        container_client, analyze_result, result_file_blob_path
+                    )
+                    await self._upload_file_to_blob(
+                        container_client, analyze_item.file_path, file_blob_path
+                    )
+                    resources.append(
+                        {
+                            "file": analyze_item.filename,
+                            "resultFile": analyze_item.result_file_name,
+                        }
+                    )
             else:
                 upload_list = self._get_upload_only_list(reference_docs_folder)
                 for upload_item in upload_list:
-                    self._logger.info(f"Using existing result.json for '{upload_item.filename}'")
-                    result_file_blob_path = storage_container_path_prefix + upload_item.result_file_name
-                    file_blob_path = storage_container_path_prefix + upload_item.filename
-                    await self._upload_file_to_blob(container_client, upload_item.file_path, file_blob_path)
-                    await self._upload_file_to_blob(container_client, upload_item.result_file_path, result_file_blob_path)
-                    resources.append({"file": upload_item.filename, "resultFile": upload_item.result_file_name})
+                    self._logger.info(
+                        f"Using existing result.json for '{upload_item.filename}'"
+                    )
+                    result_file_blob_path = (
+                        storage_container_path_prefix + upload_item.result_file_name
+                    )
+                    file_blob_path = (
+                        storage_container_path_prefix + upload_item.filename
+                    )
+                    await self._upload_file_to_blob(
+                        container_client, upload_item.file_path, file_blob_path
+                    )
+                    await self._upload_file_to_blob(
+                        container_client,
+                        upload_item.result_file_path,
+                        result_file_blob_path,
+                    )
+                    resources.append(
+                        {
+                            "file": upload_item.filename,
+                            "resultFile": upload_item.result_file_name,
+                        }
+                    )
 
             # Upload sources.jsonl
             await self.upload_jsonl_to_blob(
-                container_client, resources, storage_container_path_prefix + self.KNOWLEDGE_SOURCE_LIST_FILE_NAME)
+                container_client,
+                resources,
+                storage_container_path_prefix + self.KNOWLEDGE_SOURCE_LIST_FILE_NAME,
+            )
 
     def get_result_file(
         self, analyze_response: Response, file_id: str
     ) -> Optional[bytes]:
         """Retrieves a result file from the analyze operation using the file ID.
-        
+
         This method can be used to retrieve various types of result files including:
         - Key frame images (e.g., 'keyframes/1000')
         - Face images (e.g., 'faces/{faceId}')
-        
+
         Args:
             analyze_response (Response): The response object from the analyze operation.
             file_id (str): The ID/path of the file to retrieve (e.g., 'keyframes/1000', 'faces/{faceId}').
@@ -853,11 +954,9 @@ class AzureContentUnderstandingClient:
         # Format: {endpoint}/contentunderstanding/analyzerResults/{operationId}?api-version={version}
         operation_location_without_params = operation_location.split("?api-version")[0]
         operation_id = operation_location_without_params.split("/")[-1]
-        
+
         # Construct file retrieval URL according to TypeSpec: /analyzerResults/{operationId}/files/{+path}
-        file_retrieval_url = (
-            f"{self._endpoint}/contentunderstanding/analyzerResults/{operation_id}/files/{file_id}?api-version={self._api_version}"
-        )
+        file_retrieval_url = f"{self._endpoint}/contentunderstanding/analyzerResults/{operation_id}/files/{file_id}?api-version={self._api_version}"
         try:
             response = requests.get(url=file_retrieval_url, headers=self._headers)
             self._raise_for_status_with_detail(response)
@@ -895,7 +994,9 @@ class AzureContentUnderstandingClient:
         headers.update(self._headers)
 
         response = requests.put(
-            url=self._get_classifier_url(self._endpoint, self._api_version, classifier_id),
+            url=self._get_classifier_url(
+                self._endpoint, self._api_version, classifier_id
+            ),
             headers=headers,
             json=classifier_schema,
         )
