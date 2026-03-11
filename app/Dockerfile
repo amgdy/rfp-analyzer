@@ -37,6 +37,9 @@ COPY --from=builder /app/.venv /app/.venv
 # Copy application code
 COPY . ./
 
+# Ensure logs directory exists and is writable by appuser
+RUN mkdir -p /app/logs && chown appuser:appuser /app/logs
+
 # Set environment variables
 ENV PATH="/app/.venv/bin:$PATH"
 ENV PYTHONPATH="/app"
