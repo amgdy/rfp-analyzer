@@ -5,6 +5,7 @@
 # Runs after the dev container is created. Installs project dependencies
 # and sets up the development environment.
 
+
 set -e
 
 echo "🚀 Setting up RFP Analyzer development environment..."
@@ -20,9 +21,9 @@ export PATH="$HOME/.local/bin:$PATH"
 # Install Python dependencies
 # ---------------------------------------------------------------------------
 echo "📦 Installing Python dependencies..."
-cd app
+pushd app > /dev/null
 uv sync --all-extras
-cd ..
+popd > /dev/null
 
 # ---------------------------------------------------------------------------
 # Set up .env from template if it doesn't exist

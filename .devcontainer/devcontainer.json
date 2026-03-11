@@ -2,17 +2,17 @@
 // For config options, see https://containers.dev/implementors/json_reference/
 {
   "name": "RFP Analyzer",
-  "image": "mcr.microsoft.com/devcontainers/python:3.13",
+  "image": "mcr.microsoft.com/devcontainers/python:3.13-bookworm",
 
   "features": {
     // Azure CLI for authentication and resource management
     "ghcr.io/devcontainers/features/azure-cli:1": {},
 
     // Azure Developer CLI for provisioning and deployment
-    "ghcr.io/azure/azure-dev/azd:1": {},
+    "ghcr.io/azure/azure-dev/azd:0.2.0": {},
 
-    // Docker-in-Docker for container builds
-    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+    // Docker-outside-of-Docker for container builds (mounts host Docker socket)
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {}
   },
 
   // Port forwarding for Streamlit
@@ -36,7 +36,9 @@
         "ms-azuretools.vscode-bicep",
         "ms-azuretools.vscode-docker",
         "redhat.vscode-yaml",
-        "tamasfe.even-better-toml"
+        "tamasfe.even-better-toml",
+        "astral-sh.ty",
+        "esbenp.prettier-vscode"
       ],
       "settings": {
         "python.defaultInterpreterPath": "${workspaceFolder}/app/.venv/bin/python",
@@ -49,11 +51,17 @@
     }
   },
 
+  "remoteUser": "vscode",
+
   // Run after the container is created
   "postCreateCommand": "bash .devcontainer/post-create.sh",
 
   // Set environment variables
   "containerEnv": {
     "PYTHONPATH": "${containerWorkspaceFolder}/app"
-  }
+  },
+
+  "hostRequirements": {
+        "memory": "8gb"
+    }
 }
