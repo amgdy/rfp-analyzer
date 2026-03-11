@@ -3,6 +3,22 @@
 
 $ErrorActionPreference = "Stop"
 
+# Ask the user if they want to set Content Understanding defaults
+Write-Host ""
+Write-Host "==========================================" -ForegroundColor Cyan
+Write-Host " Content Understanding Configuration" -ForegroundColor Cyan
+Write-Host "==========================================" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "This step configures the default model deployments for Azure Content Understanding."
+Write-Host "Models: gpt-4.1, gpt-4.1-mini, text-embedding-3-large"
+Write-Host ""
+$Reply = Read-Host "Do you want to set Content Understanding defaults? (y/N)"
+
+if ($Reply -notmatch '^[Yy]$') {
+    Write-Host "⏭️  Skipping Content Understanding defaults configuration."
+    exit 0
+}
+
 Write-Host "Setting Content Understanding defaults..."
 
 # Get the Content Understanding endpoint from azd env
