@@ -22,7 +22,7 @@ export PATH="$HOME/.local/bin:$PATH"
 # ---------------------------------------------------------------------------
 echo "📦 Installing Python dependencies..."
 pushd app > /dev/null
-uv sync --all-extras
+uv sync --all-extras --active
 popd > /dev/null
 
 # ---------------------------------------------------------------------------

@@ -10,7 +10,9 @@ from .logging_config import get_logger
 try:
     from weasyprint import HTML, CSS
     PDF_AVAILABLE = True
-except ImportError:
+except (ImportError, OSError):
+    # ImportError: weasyprint not installed
+    # OSError: weasyprint installed but GTK libraries missing (common on Windows)
     PDF_AVAILABLE = False
 
 try:
