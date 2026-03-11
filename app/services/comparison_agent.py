@@ -14,6 +14,7 @@ from datetime import datetime
 from typing import List, Dict, Any, Optional, Callable
 
 from agent_framework.azure import AzureOpenAIResponsesClient
+from agent_framework import Agent
 from azure.identity import DefaultAzureCredential
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
@@ -246,7 +247,8 @@ REQUIREMENTS:
 Respond with ONLY valid JSON matching the schema in your instructions."""
 
         try:
-            agent = self.client.create_agent(
+            agent = Agent(
+                client=self.client,
                 instructions=self.SYSTEM_INSTRUCTIONS,
                 name="Comparison Agent",
                 additional_chat_options={
@@ -263,11 +265,14 @@ Respond with ONLY valid JSON matching the schema in your instructions."""
             # Log token usage
             usage = result.usage_details
             if usage:
+                input_tokens = getattr(usage, "input_token_count", 0) or 0
+                output_tokens = getattr(usage, "output_token_count", 0) or 0
+                total_tokens = getattr(usage, "total_token_count", 0) or 0
                 logger.info(
                     "Comparison - Tokens: Input=%d, Output=%d, Total=%d",
-                    usage.input_token_count or 0,
-                    usage.output_token_count or 0,
-                    usage.total_token_count or 0,
+                    input_tokens,
+                    output_tokens,
+                    total_tokens,
                 )
 
             # Parse the response
