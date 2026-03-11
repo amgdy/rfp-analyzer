@@ -1,0 +1,69 @@
+// For format details, see https://aka.ms/devcontainer.json
+// For config options, see https://containers.dev/implementors/json_reference/
+{
+  "name": "RFP Analyzer",
+  "image": "mcr.microsoft.com/devcontainers/python:3.14-bookworm",
+
+  "features": {
+    // Azure CLI for authentication and resource management
+    "ghcr.io/devcontainers/features/azure-cli:1": {},
+
+    // Azure Developer CLI for provisioning and deployment
+    "ghcr.io/azure/azure-dev/azd:0.2.0": {},
+
+    // Docker-outside-of-Docker for container builds (mounts host Docker socket)
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {}
+  },
+
+  // Port forwarding for Streamlit
+  "forwardPorts": [8501],
+  "portsAttributes": {
+    "8501": {
+      "label": "Streamlit App",
+      "onAutoForward": "notify"
+    }
+  },
+
+  // VS Code customizations
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.debugpy",
+        "ms-azuretools.azure-dev",
+        "ms-vscode.azurecli",
+        "charliermarsh.ruff",
+        "ms-azuretools.vscode-bicep",
+        "ms-azuretools.vscode-docker",
+        "redhat.vscode-yaml",
+        "tamasfe.even-better-toml",
+        "astral-sh.ty",
+        "esbenp.prettier-vscode"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "${workspaceFolder}/app/.venv/bin/python",
+        "python.terminal.activateEnvironment": true,
+        "[python]": {
+          "editor.defaultFormatter": "charliermarsh.ruff",
+          "editor.formatOnSave": true
+        }
+      }
+    }
+  },
+
+  "remoteUser": "vscode",
+
+  // Run after the container is created
+  "postCreateCommand": ".devcontainer/post-create.sh",
+
+  // Set environment variables
+  "containerEnv": {
+    "PYTHONPATH": "${containerWorkspaceFolder}/app",
+    "UV_LINK_MODE": "copy"
+  },
+
+  "hostRequirements": {
+        "memory": "8gb",
+        "cpus": 4
+    }
+}

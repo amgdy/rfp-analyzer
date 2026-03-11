@@ -1,9 +1,9 @@
 [server]
 # Maximum size of file uploads (in MB)
-maxUploadSize = 200
+maxUploadSize = 512
 
 # Maximum size of message that can be sent via websocket (in MB)
-maxMessageSize = 200
+maxMessageSize = 512
 
 # Enable CORS for container environments
 enableCORS = false
@@ -12,3 +12,10 @@ enableXsrfProtection = false
 [browser]
 # Disable file watcher in production
 gatherUsageStats = false
+
+[theme]
+primaryColor = "#4F46E5"
+backgroundColor = "#FAFAFA"
+secondaryBackgroundColor = "#F3F4F6"
+textColor = "#1F2937"
+font = "sans serif"

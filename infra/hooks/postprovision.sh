@@ -5,6 +5,23 @@
 
 set -e
 
+# Ask the user if they want to set Content Understanding defaults
+echo ""
+echo "=========================================="
+echo " Content Understanding Configuration"
+echo "=========================================="
+echo ""
+echo "This step configures the default model deployments for Azure Content Understanding."
+echo "Models: gpt-4.1, gpt-4.1-mini, text-embedding-3-large"
+echo ""
+read -r -p "Do you want to set Content Understanding defaults? (y/N): " REPLY
+echo ""
+
+if [[ ! "$REPLY" =~ ^[Yy]$ ]]; then
+    echo "⏭️  Skipping Content Understanding defaults configuration."
+    exit 0
+fi
+
 echo "Setting Content Understanding defaults..."
 
 # Get the Content Understanding endpoint from azd env

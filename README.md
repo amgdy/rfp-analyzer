@@ -390,12 +390,7 @@ uv run streamlit run main.py --server.runOnSave true
 | `python-docx` | Word document generation |
 | `plotly` | Interactive charts |
 
-### Optional Dependencies
 
-| Package | Purpose | Install |
-|---------|---------|---------|
-| `weasyprint` | PDF generation | `uv sync --extra pdf` |
-| `markdown` | Markdown to HTML conversion | `uv sync --extra pdf` |
 
 ## 🔒 Security
 
