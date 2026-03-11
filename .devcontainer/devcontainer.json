@@ -2,7 +2,7 @@
 // For config options, see https://containers.dev/implementors/json_reference/
 {
   "name": "RFP Analyzer",
-  "image": "mcr.microsoft.com/devcontainers/python:3.13-bookworm",
+  "image": "mcr.microsoft.com/devcontainers/python:3.14-bookworm",
 
   "features": {
     // Azure CLI for authentication and resource management
@@ -54,14 +54,16 @@
   "remoteUser": "vscode",
 
   // Run after the container is created
-  "postCreateCommand": "bash .devcontainer/post-create.sh",
+  "postCreateCommand": ".devcontainer/post-create.sh",
 
   // Set environment variables
   "containerEnv": {
-    "PYTHONPATH": "${containerWorkspaceFolder}/app"
+    "PYTHONPATH": "${containerWorkspaceFolder}/app",
+    "UV_LINK_MODE": "copy"
   },
 
   "hostRequirements": {
-        "memory": "8gb"
+        "memory": "8gb",
+        "cpus": 4
     }
 }

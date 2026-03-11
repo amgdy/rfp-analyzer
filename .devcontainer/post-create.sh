@@ -23,6 +23,7 @@ export PATH="$HOME/.local/bin:$PATH"
 echo "📦 Installing Python dependencies..."
 pushd app > /dev/null
 uv sync --all-extras --active
+source .venv/bin/activate
 popd > /dev/null
 
 # ---------------------------------------------------------------------------

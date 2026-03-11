@@ -7,7 +7,7 @@
 # -----------------------------------------------------------------------------
 # Stage 1: Build stage with uv for fast dependency installation
 # -----------------------------------------------------------------------------
-FROM python:3.13-slim AS builder
+FROM python:3.14-slim AS builder
 
 # Install uv for fast package management
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
@@ -24,7 +24,7 @@ RUN uv sync --frozen --no-dev --all-extras
 # -----------------------------------------------------------------------------
 # Stage 2: Runtime stage
 # -----------------------------------------------------------------------------
-FROM python:3.13-slim AS runtime
+FROM python:3.14-slim AS runtime
 
 # Install system dependencies for WeasyPrint (PDF export)
 RUN apt-get update && apt-get install -y --no-install-recommends \
