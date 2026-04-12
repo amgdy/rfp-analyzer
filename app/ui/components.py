@@ -18,12 +18,13 @@ def render_step_indicator(current_step: int):
     """Render a horizontal wizard-style step progress indicator.
 
     Args:
-        current_step: The current active step (1, 2, or 3).
+        current_step: The current active step (1, 2, 3, or 4).
     """
     steps = [
         (1, "Upload"),
         (2, "Extract"),
-        (3, "Evaluate"),
+        (3, "Criteria"),
+        (4, "Score"),
     ]
 
     step_html_parts = []
@@ -146,8 +147,9 @@ def render_sidebar():
             st.markdown("##### 📍 Progress")
             steps = [
                 ("1️⃣", "Upload Documents", st.session_state.step >= 1),
-                ("2️⃣", "Configure & Extract", st.session_state.step >= 2),
-                ("3️⃣", "Evaluate & Compare", st.session_state.step >= 3),
+                ("2️⃣", "Extract Content", st.session_state.step >= 2),
+                ("3️⃣", "Review Criteria", st.session_state.step >= 3),
+                ("4️⃣", "Score & Compare", st.session_state.step >= 4),
             ]
 
             for icon, label, active in steps:
@@ -172,6 +174,7 @@ def render_sidebar():
                 st.session_state.proposal_contents = {}
                 st.session_state.evaluation_results = []
                 st.session_state.comparison_results = None
+                st.session_state.extracted_criteria = None
                 st.session_state.global_criteria = ""
                 st.session_state.extraction_service = (
                     ExtractionService.DOCUMENT_INTELLIGENCE

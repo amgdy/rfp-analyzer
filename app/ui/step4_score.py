@@ -1,4 +1,4 @@
-"""Step 3: Evaluate and Compare vendor proposals."""
+"""Step 4: Score Proposals and Compare vendor results."""
 
 import streamlit as st
 import asyncio
@@ -24,37 +24,39 @@ except ImportError:
 logger = get_logger(__name__)
 
 
-def render_step3():
-    """Step 3: Evaluate and Compare."""
-    render_step_indicator(current_step=3)
+def render_step4():
+    """Step 4: Score Proposals & Compare."""
+    render_step_indicator(current_step=4)
 
-    st.header("Step 3: Evaluate & Compare")
-    st.markdown("Evaluating vendor proposals against RFP requirements and generating comparison.")
+    st.header("Step 4: Score & Compare")
+    st.markdown("Scoring vendor proposals against the extracted criteria and generating comparison.")
 
     # Show files summary
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     with col1:
         if st.session_state.rfp_file:
             st.info(f"📄 RFP: {st.session_state.rfp_file['name']}")
     with col2:
         if st.session_state.proposal_files:
             st.info(f"📝 Proposals: {len(st.session_state.proposal_files)} file(s)")
+    with col3:
+        criteria_data = st.session_state.extracted_criteria
+        if criteria_data:
+            criteria_count = len(criteria_data.get("criteria", []))
+            st.info(f"📋 Criteria: {criteria_count}")
 
-    # Show evaluation process info
-    with st.expander("🤖 Multi-Agent Evaluation Process", expanded=False):
+    # Show scoring process info
+    with st.expander("🤖 Scoring Process", expanded=False):
         st.info("""
-        **Evaluation Process:**
+        **How Scoring Works:**
 
-        1. **Criteria Extraction Agent**: Analyzes the RFP document to automatically
-           extract scoring criteria with weights (totaling 100%).
-
-        2. **Proposal Scoring Agent**: Evaluates each vendor proposal against the
+        1. **Proposal Scoring Agent**: Evaluates each vendor proposal against the
            extracted criteria, providing detailed scores and justifications.
 
-        3. **Comparison Agent**: Compares all vendor scores and generates a
+        2. **Comparison Agent**: Compares all vendor scores and generates a
            comprehensive comparison report with rankings.
 
-        This approach ensures that scoring is tailored to each specific RFP's requirements.
+        Criteria have already been extracted in the previous step.
         """)
 
     # Check if evaluation has been completed
@@ -76,22 +78,22 @@ def render_step3():
 
     # Navigation
     st.markdown("---")
-    if st.button("⬅️ Back to Step 2", disabled=st.session_state.is_processing):
-        logger.info("User navigating back to Step 2")
-        st.session_state.step = 2
+    if st.button("⬅️ Back to Step 3", disabled=st.session_state.is_processing):
+        logger.info("User navigating back to Step 3")
+        st.session_state.step = 3
         st.session_state.evaluation_results = []
         st.session_state.comparison_results = None
         st.rerun()
 
 
 def run_evaluation_pipeline():
-    """Run the full multi-vendor evaluation pipeline with parallel processing and clean UI."""
-    from services.pipelines import evaluate_proposal
+    """Run the proposal scoring pipeline with parallel processing and clean UI."""
+    from services.pipelines import score_proposal
 
     reasoning_effort = st.session_state.reasoning_effort
-    global_criteria = st.session_state.global_criteria
+    extracted_criteria = st.session_state.extracted_criteria
 
-    logger.info("====== EVALUATION PIPELINE STARTED (Effort: %s) ======", reasoning_effort)
+    logger.info("====== SCORING PIPELINE STARTED (Effort: %s) ======", reasoning_effort)
     pipeline_start = time.time()
 
     # Inject animation CSS
@@ -178,24 +180,23 @@ def run_evaluation_pipeline():
 
         render_status()
 
-        # Define async function for parallel proposal evaluation
-        async def evaluate_all_proposals():
+        # Define async function for parallel proposal scoring
+        async def score_all_proposals():
             tasks = []
             for i, proposal_file in enumerate(proposal_files):
                 proposal_name = proposal_file["name"]
                 proposal_content = st.session_state.proposal_contents.get(proposal_name, "")
 
-                task = evaluate_proposal(
-                    st.session_state.rfp_content,
+                task = score_proposal(
+                    extracted_criteria,
                     proposal_content,
-                    global_criteria=global_criteria,
-                    reasoning_effort=reasoning_effort
+                    reasoning_effort=reasoning_effort,
                 )
                 tasks.append(task)
             return await asyncio.gather(*tasks, return_exceptions=True)
 
-        # Run parallel evaluation
-        results = asyncio.run(evaluate_all_proposals())
+        # Run parallel scoring
+        results = asyncio.run(score_all_proposals())
 
         # Process results
         for i, result in enumerate(results):
@@ -273,7 +274,7 @@ def run_evaluation_pipeline():
         total_duration = time.time() - pipeline_start
         st.session_state.step_durations["evaluation_total"] = total_duration
 
-        logger.info("====== EVALUATION PIPELINE COMPLETED in %.2fs ======", total_duration)
+        logger.info("====== SCORING PIPELINE COMPLETED in %.2fs ======", total_duration)
 
         # Final render
         render_status()

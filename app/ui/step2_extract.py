@@ -43,8 +43,8 @@ def render_step2():
     """Step 2: Extract Content from Documents."""
     render_step_indicator(current_step=2)
 
-    st.header("Step 2: Extract & Configure")
-    st.markdown("Extract content from uploaded documents and configure evaluation settings.")
+    st.header("Step 2: Extract Content")
+    st.markdown("Extract text content from uploaded documents using Azure AI services.")
 
     # Show uploaded files summary
     col1, col2 = st.columns(2)
@@ -97,12 +97,12 @@ def render_step2():
         _render_content_previews()
 
         if st.button(
-            "Continue to Step 3: Evaluate →",
+            "Continue to Step 3: Review Criteria →",
             type="primary",
             use_container_width=True,
             disabled=st.session_state.is_processing
         ):
-            logger.info("User proceeding to Step 3 - Evaluation")
+            logger.info("User proceeding to Step 3 - Criteria Review")
             st.session_state.step = 3
             st.rerun()
     else:
