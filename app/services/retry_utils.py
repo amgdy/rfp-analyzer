@@ -44,7 +44,42 @@ _RETRYABLE_SUBSTRINGS = (
     "too many requests",
     "retry",
     "empty response",
+    "cannot assist",
+    "content policy",
+    "model refusal",
 )
+
+# Phrases that indicate the model refused to process the request instead of
+# returning the expected JSON output.  These are checked against the raw
+# response text (case-insensitive) before JSON parsing so we can raise a
+# retryable error early.
+_REFUSAL_PHRASES = (
+    "i'm sorry, but i cannot assist",
+    "i cannot assist with that request",
+    "i'm unable to assist",
+    "as an ai, i cannot",
+    "i'm not able to help with that",
+    "i can't assist with that",
+    "content policy",
+)
+
+
+def check_for_refusal(response_text: str) -> None:
+    """Raise ``RuntimeError`` if the response looks like a model refusal.
+
+    The error message intentionally contains *"cannot assist"* so that
+    :func:`_is_retryable` classifies it as retryable, giving the caller
+    another attempt automatically.
+    """
+    if not response_text:
+        return
+    lower = response_text.strip().lower()
+    for phrase in _REFUSAL_PHRASES:
+        if phrase in lower:
+            raise RuntimeError(
+                f"Model refusal detected — cannot assist "
+                f"(matched: {phrase!r}). Full response: {response_text[:200]}"
+            )
 
 
 def _is_retryable(exc: BaseException) -> bool:

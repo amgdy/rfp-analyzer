@@ -26,7 +26,7 @@ from .token_utils import (
     truncate_content,
 )
 from .utils import parse_json_response
-from .retry_utils import run_with_retry
+from .retry_utils import run_with_retry, check_for_refusal
 from .telemetry import get_tracer
 
 # Optional dependency for Word document generation
@@ -378,6 +378,9 @@ Respond with ONLY valid JSON matching the schema in your instructions."""
             raise RuntimeError(
                 "Model returned empty response text — cannot compare vendors"
             )
+
+        # Raise on model refusal so the retry logic retries automatically
+        check_for_refusal(response_text)
 
         try:
             return parse_json_response(response_text)

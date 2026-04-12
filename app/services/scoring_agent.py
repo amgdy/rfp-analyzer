@@ -27,7 +27,7 @@ from .token_utils import (
     split_content_by_tokens,
 )
 from .utils import parse_json_response
-from .retry_utils import run_with_retry
+from .retry_utils import run_with_retry, check_for_refusal
 from .telemetry import get_tracer
 
 load_dotenv()
@@ -523,6 +523,9 @@ Respond with ONLY valid JSON matching the schema in your instructions."""
             raise RuntimeError(
                 "Model returned empty response text — cannot extract criteria"
             )
+
+        # Raise on model refusal so the retry logic retries automatically
+        check_for_refusal(response_text)
 
         try:
             data = parse_json_response(response_text)
@@ -1037,6 +1040,9 @@ Respond with ONLY valid JSON matching the schema in your instructions."""
             raise RuntimeError(
                 "Model returned empty response text — cannot score proposal"
             )
+
+        # Raise on model refusal so the retry logic retries automatically
+        check_for_refusal(response_text)
 
         try:
             data = parse_json_response(response_text)
