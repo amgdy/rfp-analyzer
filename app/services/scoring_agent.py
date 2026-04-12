@@ -1016,8 +1016,14 @@ Respond with ONLY valid JSON matching the schema in your instructions."""
             data.setdefault("is_qualified_proposal", True)
             data.setdefault("disqualification_reason", "")
 
-            # Recalculate total score for accuracy
+            # Recalculate weighted scores and total in code for accuracy
+            # (don't trust AI-computed weighted_score values)
             criterion_scores = data.get("criterion_scores", [])
+            for cs in criterion_scores:
+                raw = cs.get("raw_score", 0) or 0
+                weight = cs.get("weight", 0) or 0
+                cs["weighted_score"] = round((raw * weight) / 100, 2)
+
             total_score = sum(cs.get("weighted_score", 0) for cs in criterion_scores)
             data["total_score"] = round(total_score, 2)
             data["score_percentage"] = round(total_score, 2)

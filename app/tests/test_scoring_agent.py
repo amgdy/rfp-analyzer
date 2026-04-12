@@ -201,8 +201,8 @@ class TestProposalScoringAgentParse:
             "grade": "F",
             "recommendation": "No",
             "criterion_scores": [
-                {"weighted_score": 40.0},
-                {"weighted_score": 35.0}
+                {"raw_score": 80.0, "weight": 50.0, "weighted_score": 999},
+                {"raw_score": 70.0, "weight": 50.0, "weighted_score": 999}
             ],
             "executive_summary": "OK",
             "overall_strengths": [],
@@ -211,23 +211,40 @@ class TestProposalScoringAgentParse:
             "risk_assessment": "Low"
         })
         result = agent._parse_response(response, criteria)
-        # Should recalculate total score
+        # Should recalculate weighted_score = raw_score * weight / 100
+        assert result["criterion_scores"][0]["weighted_score"] == 40.0
+        assert result["criterion_scores"][1]["weighted_score"] == 35.0
+        # Should recalculate total score from weighted scores
         assert result["total_score"] == 75.0
         assert result["grade"] == "C"  # 70-79
 
     def test_parse_sets_grade_a(self, agent, criteria):
         response = json.dumps({
-            "criterion_scores": [{"weighted_score": 95.0}],
+            "criterion_scores": [{"raw_score": 95.0, "weight": 100.0}],
         })
         result = agent._parse_response(response, criteria)
         assert result["grade"] == "A"
 
     def test_parse_sets_grade_f(self, agent, criteria):
         response = json.dumps({
-            "criterion_scores": [{"weighted_score": 30.0}],
+            "criterion_scores": [{"raw_score": 30.0, "weight": 100.0}],
         })
         result = agent._parse_response(response, criteria)
         assert result["grade"] == "F"
+
+    def test_parse_recalculates_weighted_score(self, agent, criteria):
+        """Verify _parse_response recomputes weighted_score from raw_score * weight / 100."""
+        response = json.dumps({
+            "criterion_scores": [
+                {"raw_score": 90.0, "weight": 40.0, "weighted_score": 0},
+                {"raw_score": 80.0, "weight": 60.0, "weighted_score": 0},
+            ],
+        })
+        result = agent._parse_response(response, criteria)
+        assert result["criterion_scores"][0]["weighted_score"] == 36.0  # 90*40/100
+        assert result["criterion_scores"][1]["weighted_score"] == 48.0  # 80*60/100
+        assert result["total_score"] == 84.0  # 36+48
+        assert result["grade"] == "B"  # 80-89
 
     def test_parse_invalid_json_returns_default(self, agent, criteria):
         result = agent._parse_response("broken", criteria)

@@ -811,25 +811,38 @@ def render_detailed_scores(evaluations: list):
         return
 
     # Create comparison table data — lookup by criterion_id
+    # Show raw scores per criterion with weight column so users understand the total
     table_data = []
     for criterion in first_criteria:
         cid = criterion.get("criterion_id", "")
         criterion_name = criterion.get("criterion_name", cid)
-        row = {"Criterion": criterion_name}
+        weight = criterion.get("weight", 0)
+        row = {"Criterion": criterion_name, "Weight": f"{weight:.1f}%"}
         for eval_result in evaluations:
             vendor_name = eval_result.get("supplier_name", "Unknown")[:15]
             score_map = _build_criterion_score_map(eval_result)
             cs = score_map.get(cid, {})
-            row[vendor_name] = f"{cs.get('raw_score', 0):.1f}"
+            raw = cs.get("raw_score", 0) or 0
+            w = cs.get("weight", 0) or 0
+            weighted = round((raw * w) / 100, 2)
+            row[vendor_name] = f"{raw:.1f} ({weighted:.1f})"
         table_data.append(row)
 
-    # Add total row
-    total_row = {"Criterion": "**TOTAL SCORE**"}
+    # Add total row — compute weighted totals from raw data in code
+    total_row = {"Criterion": "**TOTAL SCORE**", "Weight": "100%"}
     for eval_result in evaluations:
         vendor_name = eval_result.get("supplier_name", "Unknown")[:15]
-        total_row[vendor_name] = f"**{eval_result.get('total_score', 0):.1f}**"
+        # Recompute total from criterion scores for accuracy
+        computed_total = 0.0
+        for cs in eval_result.get("criterion_scores", []):
+            raw = cs.get("raw_score", 0) or 0
+            w = cs.get("weight", 0) or 0
+            computed_total += (raw * w) / 100
+        computed_total = round(computed_total, 1)
+        total_row[vendor_name] = f"**{computed_total}**"
     table_data.append(total_row)
 
+    st.caption("Scores shown as: Raw Score (Weighted Score). Total is the sum of weighted scores.")
     st.table(table_data)
 
 
