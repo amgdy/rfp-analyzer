@@ -11,8 +11,7 @@ import time
 from datetime import datetime
 from typing import Annotated
 
-from openai import AzureOpenAI
-from agent_framework.openai import OpenAIChatClient, OpenAIChatCompletionClient
+from agent_framework.openai import OpenAIChatClient
 from azure.identity import DefaultAzureCredential
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
