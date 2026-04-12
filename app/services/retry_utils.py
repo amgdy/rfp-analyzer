@@ -43,6 +43,7 @@ _RETRYABLE_SUBSTRINGS = (
     "capacity",
     "too many requests",
     "retry",
+    "empty response",
 )
 
 

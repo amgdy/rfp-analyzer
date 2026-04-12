@@ -68,6 +68,10 @@ class TestIsRetryable:
     def test_validation_error(self):
         assert _is_retryable(ValueError("Missing required field")) is False
 
+    def test_empty_response_is_retryable(self):
+        """Empty model responses should be retried."""
+        assert _is_retryable(RuntimeError("Model returned empty response text — cannot score")) is True
+
     def test_status_attribute_named_status(self):
         """Some SDKs use .status instead of .status_code."""
         exc = Exception("Error")
