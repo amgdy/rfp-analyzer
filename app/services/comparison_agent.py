@@ -335,28 +335,28 @@ Respond with ONLY valid JSON matching the schema in your instructions."""
             total_score = eval_result.get("total_score", 0)
             grade = eval_result.get("grade", "N/A")
 
-            summary = f"""### Vendor {i}: {vendor_name}
+            parts = [f"""### Vendor {i}: {vendor_name}
 - **Total Score:** {total_score:.2f}
 - **Grade:** {grade}
 
 **Criterion Scores:**
-"""
+"""]
 
             # Add criterion scores
             criterion_scores = eval_result.get("criterion_scores", [])
             for cs in criterion_scores:
-                summary += f"- {cs.get('criterion_name', cs.get('criterion_id', 'Unknown'))}: {cs.get('raw_score', 0):.1f} (weighted: {cs.get('weighted_score', 0):.2f})\n"
+                parts.append(f"- {cs.get('criterion_name', cs.get('criterion_id', 'Unknown'))}: {cs.get('raw_score', 0):.1f} (weighted: {cs.get('weighted_score', 0):.2f})\n")
 
             # Add strengths and weaknesses
             strengths = eval_result.get("overall_strengths", [])
             weaknesses = eval_result.get("overall_weaknesses", [])
 
             if strengths:
-                summary += "\n**Strengths:** " + ", ".join(strengths[:5])
+                parts.append("\n**Strengths:** " + ", ".join(strengths[:5]))
             if weaknesses:
-                summary += "\n**Weaknesses:** " + ", ".join(weaknesses[:5])
+                parts.append("\n**Weaknesses:** " + ", ".join(weaknesses[:5]))
 
-            formatted.append(summary)
+            formatted.append("".join(parts))
 
         return "\n\n---\n\n".join(formatted)
 

@@ -7,6 +7,9 @@ from ui.components import render_step_indicator
 
 logger = get_logger(__name__)
 
+# Maximum file size: 100 MB per file
+_MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024
+
 
 def render_step1():
     """Step 1: Upload RFP and Vendor Proposals."""
@@ -29,13 +32,16 @@ def render_step1():
         )
 
         if rfp_file is not None:
-            st.info(f"📎 **{rfp_file.name}** ({rfp_file.size / 1024:.1f} KB)")
-            if st.session_state.rfp_file is None or st.session_state.rfp_file.get('name') != rfp_file.name:
-                logger.info("RFP file uploaded: %s (%.1f KB)", rfp_file.name, rfp_file.size / 1024)
-            st.session_state.rfp_file = {
-                "bytes": rfp_file.getvalue(),
-                "name": rfp_file.name
-            }
+            if rfp_file.size > _MAX_FILE_SIZE_BYTES:
+                st.error(f"⚠️ File **{rfp_file.name}** exceeds the 100 MB size limit.")
+            else:
+                st.info(f"📎 **{rfp_file.name}** ({rfp_file.size / 1024:.1f} KB)")
+                if st.session_state.rfp_file is None or st.session_state.rfp_file.get('name') != rfp_file.name:
+                    logger.info("RFP file uploaded: %s (%.1f KB)", rfp_file.name, rfp_file.size / 1024)
+                st.session_state.rfp_file = {
+                    "bytes": rfp_file.getvalue(),
+                    "name": rfp_file.name
+                }
 
         if st.session_state.rfp_file:
             st.success(f"✅ RFP ready: {st.session_state.rfp_file['name']}")
@@ -53,22 +59,29 @@ def render_step1():
         )
 
         if proposal_files:
-            st.info(f"📎 {len(proposal_files)} file(s) selected")
-            for f in proposal_files:
-                st.caption(f"• {f.name} ({f.size / 1024:.1f} KB)")
+            oversized = [f for f in proposal_files if f.size > _MAX_FILE_SIZE_BYTES]
+            if oversized:
+                for f in oversized:
+                    st.error(f"⚠️ File **{f.name}** exceeds the 100 MB size limit.")
+            valid_files = [f for f in proposal_files if f.size <= _MAX_FILE_SIZE_BYTES]
 
-            # Log new uploads
-            current_names = {p.get('name') for p in st.session_state.proposal_files} if st.session_state.proposal_files else set()
-            new_names = {f.name for f in proposal_files}
-            if current_names != new_names:
-                logger.info("Proposal files uploaded: %d files - %s",
-                           len(proposal_files),
-                           ", ".join(f.name for f in proposal_files))
+            if valid_files:
+                st.info(f"📎 {len(valid_files)} file(s) selected")
+                for f in valid_files:
+                    st.caption(f"• {f.name} ({f.size / 1024:.1f} KB)")
 
-            st.session_state.proposal_files = [
-                {"bytes": f.getvalue(), "name": f.name}
-                for f in proposal_files
-            ]
+                # Log new uploads
+                current_names = {p.get('name') for p in st.session_state.proposal_files} if st.session_state.proposal_files else set()
+                new_names = {f.name for f in valid_files}
+                if current_names != new_names:
+                    logger.info("Proposal files uploaded: %d files - %s",
+                               len(valid_files),
+                               ", ".join(f.name for f in valid_files))
+
+                st.session_state.proposal_files = [
+                    {"bytes": f.getvalue(), "name": f.name}
+                    for f in valid_files
+                ]
 
         if st.session_state.proposal_files:
             st.success(f"✅ {len(st.session_state.proposal_files)} proposal(s) ready")

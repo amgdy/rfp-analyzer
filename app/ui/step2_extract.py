@@ -335,4 +335,4 @@ def run_extraction_pipeline():
         extraction_queue.finish()
         st.session_state.extraction_queue = extraction_queue
         st.session_state.is_processing = False
-        st.error(f"❌ Error during extraction: {str(e)}")
+        st.error("❌ Error during extraction. Please check the logs and try again.")

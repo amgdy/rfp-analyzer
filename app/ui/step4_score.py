@@ -322,7 +322,7 @@ def run_evaluation_pipeline():
         st.session_state.scoring_queue = scoring_queue
         st.session_state.is_processing = False
         render_status()
-        st.error(f"❌ Error during evaluation: {str(e)}")
+        st.error("❌ Error during evaluation. Please check the logs and try again.")
 
 
 # ---------------------------------------------------------------------------
