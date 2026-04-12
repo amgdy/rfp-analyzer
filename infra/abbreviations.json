@@ -1,5 +1,6 @@
 {
-    "aiFoundryAccounts": "aif",
+    "aiFoundryAccounts": "aif-",
+    "aiFoundryProjects": "aiproj-",
     "analysisServicesServers": "as",
     "apiManagementService": "apim-",
     "appConfigurationStores": "appcs-",

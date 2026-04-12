@@ -12,6 +12,7 @@ param foundryLocation string
 
 var abbrs = loadJsonContent('./abbreviations.json')
 var resourceToken = substring(toLower(uniqueString(subscription().id, resourceGroup().id, location)), 0, 6)
+var workload = 'rfpa'
 
 
 var modelName = 'gpt-5.2'
@@ -73,9 +74,9 @@ var defaultOpenAiDeployments = [
 module monitoring 'br/public:avm/ptn/azd/monitoring:0.2.1' = {
   name: 'monitoring'
   params: {
-    logAnalyticsName: '${abbrs.operationalInsightsWorkspaces}${resourceToken}'
-    applicationInsightsName: '${abbrs.insightsComponents}${resourceToken}'
-    applicationInsightsDashboardName: '${abbrs.portalDashboards}${resourceToken}'
+    logAnalyticsName: '${abbrs.operationalInsightsWorkspaces}${workload}-${resourceToken}'
+    applicationInsightsName: '${abbrs.insightsComponents}${workload}-${resourceToken}'
+    applicationInsightsDashboardName: '${abbrs.portalDashboards}${workload}-${resourceToken}'
     location: location
     tags: tags
     enableTelemetry: true
@@ -83,8 +84,8 @@ module monitoring 'br/public:avm/ptn/azd/monitoring:0.2.1' = {
 }
 
 
-var foundryProjectName = 'proj-rfpa-${resourceToken}'
-var foundryAccountName = '${abbrs.aiFoundryAccounts}-rfpa-${resourceToken}'
+var foundryProjectName = '${abbrs.aiFoundryProjects}${workload}-${resourceToken}'
+var foundryAccountName = '${abbrs.aiFoundryAccounts}${workload}-${resourceToken}'
 
 // Microsoft Foundry Resource
 module foundryAccount 'br/public:avm/res/cognitive-services/account:0.14.2' = {
@@ -159,7 +160,7 @@ var contentUnderstandingEndpoint = foundryAccount.outputs.endpoints['Content Und
 module rfpAnalyzerIdentity 'br/public:avm/res/managed-identity/user-assigned-identity:0.5.0' = {
   name: 'rfpAnalyzeridentity'
   params: {
-    name: '${abbrs.managedIdentityUserAssignedIdentities}rfpAnalyzer-${resourceToken}'
+    name: '${abbrs.managedIdentityUserAssignedIdentities}${workload}-${resourceToken}'
     location: location
   }
 }
@@ -168,7 +169,7 @@ module rfpAnalyzerIdentity 'br/public:avm/res/managed-identity/user-assigned-ide
 module containerRegistry 'br/public:avm/res/container-registry/registry:0.12.1' = {
   name: 'registry'
   params: {
-    name: '${abbrs.containerRegistryRegistries}${resourceToken}'
+    name: '${abbrs.containerRegistryRegistries}${workload}${resourceToken}'
     location: location
     tags: tags
     acrSku: 'Standard'
@@ -190,7 +191,7 @@ module containerRegistry 'br/public:avm/res/container-registry/registry:0.12.1' 
 module containerAppsEnvironment 'br/public:avm/res/app/managed-environment:0.13.1' = {
   name: 'container-apps-environment'
   params: {
-    name: '${abbrs.appManagedEnvironments}${resourceToken}'
+    name: '${abbrs.appManagedEnvironments}${workload}-${resourceToken}'
     location: location
     zoneRedundant: false
     publicNetworkAccess: 'Enabled'
@@ -207,14 +208,14 @@ module rfpAnalyzerFetchLatestImage './modules/fetch-container-image.bicep' = {
   name: 'rfpAnalyzer-fetch-image'
   params: {
     exists: rfpAnalyzerExists
-    name: 'rfp-analyzer'
+    name: '${abbrs.appContainerApps}${workload}-${resourceToken}'
   }
 }
 
 module rfpAnalyzer 'br/public:avm/res/app/container-app:0.22.0' = {
   name: 'rfpAnalyzer'
   params: {
-    name: 'rfp-analyzer'
+    name: '${abbrs.appContainerApps}${workload}-${resourceToken}'
     ingressTargetPort: 8501
     ingressExternal: true
     // Allow larger file uploads (default is often 100MB, set to 200MB for RFP documents)
