@@ -109,9 +109,15 @@ module foundryAccount 'br/public:avm/res/cognitive-services/account:0.14.2' = {
   }
 }
 
+// Reference the deployed Foundry Account for use as parent
+resource foundryAccountResource 'Microsoft.CognitiveServices/accounts@2025-09-01' existing = {
+  name: foundryAccountName
+}
+
 // Microsoft Foundry Project Resource
 resource foundryProject 'Microsoft.CognitiveServices/accounts/projects@2025-09-01' = {
-  name: '${foundryAccountName}/${foundryProjectName}'
+  name: foundryProjectName
+  parent: foundryAccountResource
   location: foundryLocation
   identity: {
     type: 'SystemAssigned'
