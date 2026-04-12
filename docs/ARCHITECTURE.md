@@ -10,6 +10,7 @@ This document provides a comprehensive overview of the RFP Analyzer application 
 - [Multi-Agent System](#multi-agent-system)
 - [Azure Infrastructure](#azure-infrastructure)
 - [Data Flow](#data-flow)
+  - [Large Document Chunking Process](#large-document-chunking-process)
 - [Security Architecture](#security-architecture)
 
 ---
@@ -509,6 +510,109 @@ flowchart TB
     style Session fill:#f3e5f5,stroke:#7b1fa2
     style Scoring fill:#e8f5e9,stroke:#388e3c
     style CA fill:#fff9c4,stroke:#f9a825
+```
+
+### Large Document Chunking Process
+
+When a document exceeds the model's context window (configurable via `MAX_CONTEXT_TOKENS` env var, default 1,050,000 tokens), the system automatically splits it into manageable chunks and processes them using a map-reduce pattern.
+
+#### Scoring Agent V2 — Map-Reduce Chunked Processing
+
+```mermaid
+flowchart TB
+    Doc["📄 Input Document<br>(RFP or Proposal)"]
+
+    Doc --> EstTokens["🔢 Estimate Token Count<br>(chars ÷ 3.5)"]
+    EstTokens --> Check{"Tokens ≤<br>context budget?"}
+
+    Check -- Yes --> Single["✅ Single-Call Processing<br>Send full document to LLM"]
+
+    Check -- No --> Split["✂️ Split by Token Budget"]
+
+    subgraph Splitting["Content Splitting Strategy"]
+        direction TB
+        Split --> H["1. Split by markdown headings"]
+        H --> P["2. Oversized sections → split by paragraphs"]
+        P --> T["3. Oversized paragraphs → truncate at boundary"]
+        T --> OV["4. Add overlap tokens between chunks<br>for context continuity"]
+    end
+
+    subgraph MapPhase["Map Phase — Process Each Chunk"]
+        direction LR
+        C1["📦 Chunk 1<br>LLM Call"]
+        C2["📦 Chunk 2<br>LLM Call"]
+        CN["📦 Chunk N<br>LLM Call"]
+    end
+
+    Splitting --> MapPhase
+
+    subgraph ReducePhase["Reduce Phase — Merge Results"]
+        direction TB
+        Best["For each criterion:<br>keep highest raw_score<br>across all chunks"]
+        Best --> Recalc["Recalculate<br>weighted scores &amp; totals"]
+        Recalc --> Dedup["Deduplicate strengths,<br>weaknesses, recommendations"]
+        Dedup --> Grade["Assign final grade<br>(A/B/C/D/F)"]
+    end
+
+    MapPhase --> ReducePhase
+    ReducePhase --> Final["📊 Final Merged Evaluation"]
+    Single --> Final
+
+    style Splitting fill:#e3f2fd,stroke:#1565c0
+    style MapPhase fill:#fff3e0,stroke:#ef6c00
+    style ReducePhase fill:#e8f5e9,stroke:#2e7d32
+```
+
+#### Criteria Extraction — Chunked Merge
+
+When the RFP document itself is too large for a single LLM call, criteria extraction also uses chunking:
+
+```mermaid
+flowchart TB
+    RFP["📄 Large RFP Document"]
+    RFP --> Split["✂️ Split into N chunks<br>(by heading / paragraph boundaries)"]
+
+    subgraph Extract["Extract Criteria per Chunk"]
+        direction LR
+        E1["Chunk 1 → Criteria[]"]
+        E2["Chunk 2 → Criteria[]"]
+        EN["Chunk N → Criteria[]"]
+    end
+
+    Split --> Extract
+
+    subgraph Merge["Merge &amp; Normalize"]
+        direction TB
+        DD["Deduplicate criteria<br>(by name, case-insensitive)"]
+        DD --> ReID["Re-assign criterion IDs<br>(C-1, C-2, …)"]
+        ReID --> Norm["Normalize weights<br>to sum = 100%"]
+    end
+
+    Extract --> Merge
+    Merge --> Out["📋 ExtractedCriteria<br>(unified, deduplicated)"]
+
+    style Extract fill:#fff3e0,stroke:#ef6c00
+    style Merge fill:#e8f5e9,stroke:#2e7d32
+```
+
+#### Scoring Agent V1 — Truncation Strategy
+
+The legacy scoring agent uses a simpler truncation approach for oversized documents:
+
+```mermaid
+flowchart TB
+    Doc["📄 Combined RFP + Proposal"]
+    Doc --> Check{"Combined tokens ≤<br>context budget?"}
+
+    Check -- Yes --> Direct["✅ Send full content<br>to LLM"]
+
+    Check -- No --> Budget["📐 Calculate budgets:<br>Proposal = 60% of budget<br>RFP = 40% of budget"]
+    Budget --> TruncP["✂️ Truncate proposal<br>at paragraph/sentence boundary"]
+    Budget --> TruncR["✂️ Truncate RFP<br>at paragraph/sentence boundary"]
+    TruncP --> Send["📤 Send truncated content<br>to LLM"]
+    TruncR --> Send
+
+    style Budget fill:#fff3e0,stroke:#ef6c00
 ```
 
 ---
