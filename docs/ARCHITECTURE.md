@@ -103,11 +103,12 @@ flowchart TB
         subgraph Steps["Workflow Steps"]
             S1["Step 1: Upload<br>• RFP file<br>• Proposals<br>• Preview"]
             S2["Step 2: Extract<br>• Service selection<br>• Progress<br>• Results"]
-            S3["Step 3: Evaluate<br>• Criteria extraction<br>• Proposal scoring<br>• Vendor comparison<br>• Export options"]
+            S3["Step 3: Criteria<br>• AI-extracted criteria<br>• Weights review<br>• User confirmation"]
+            S4["Step 4: Score<br>• Proposal scoring<br>• Vendor comparison<br>• Export options"]
         end
         
         SSM --> Steps
-        S1 --> S2 --> S3
+        S1 --> S2 --> S3 --> S4
     end
     
     style StreamlitApp fill:#fff3e0,stroke:#e65100
@@ -139,13 +140,13 @@ flowchart TB
     style DocProcessor fill:#e3f2fd,stroke:#1565c0
 ```
 
-#### 3. Multi-Agent Scoring System (`scoring_agent_v2.py`)
+#### 3. Multi-Agent Scoring System (`scoring_agent.py`)
 
 Implements the AI-powered evaluation using specialized agents:
 
 ```mermaid
 flowchart TB
-    subgraph ScoringSystem["Scoring Agent V2 System"]
+    subgraph ScoringSystem["Scoring Agent System"]
         subgraph Agent1["Criteria Extraction Agent"]
             I1["Input: RFP Document (Markdown)"]
             O1["Output: ExtractedCriteria<br>• rfp_title<br>• rfp_summary<br>• criteria[] with weights<br>• evaluation_guidance"]
@@ -154,7 +155,7 @@ flowchart TB
         
         subgraph Agent2["Proposal Scoring Agent"]
             I2["Input: Proposal + ExtractedCriteria"]
-            O2["Output: ProposalEvaluationV2<br>• total_score<br>• criterion_scores[]<br>• strengths / weaknesses<br>• recommendation"]
+            O2["Output: ProposalEvaluation<br>• total_score<br>• criterion_scores[]<br>• strengths / weaknesses<br>• recommendation"]
             I2 --> O2
         end
         
@@ -164,7 +165,7 @@ flowchart TB
             M1["ScoringCriterion"]
             M2["ExtractedCriteria"]
             M3["CriterionScore"]
-            M4["ProposalEvaluationV2"]
+            M4["ProposalEvaluation"]
         end
     end
     
@@ -178,7 +179,7 @@ Compares multiple vendor evaluations and generates comparative analysis:
 ```mermaid
 flowchart TB
     subgraph CompAgent["Comparison Agent"]
-        Input["Input: List[ProposalEvaluationV2]"]
+        Input["Input: List[ProposalEvaluation]"]
         
         subgraph Engine["Analysis Engine"]
             E1["1. Rank vendors by total score"]
@@ -473,23 +474,24 @@ flowchart TB
     
     RFP --> CEA
     
-    subgraph CEA["Criteria Extraction Agent"]
+    subgraph CEA["Step 3: Criteria Extraction Agent"]
         CEA1["Azure OpenAI Call<br>structured output"]
     end
     
     CEA --> EC["ExtractedCriteria<br>Pydantic model"]
     
-    EC --> SA1 & SAN
+    EC --> Review["👤 User Reviews Criteria &amp; Weights"]
+    Review --> SA1 & SAN
     P1 --> SA1
     PN --> SAN
     
-    subgraph Scoring["Parallel Scoring"]
+    subgraph Scoring["Step 4: Parallel Scoring"]
         SA1["Scoring Agent<br>Proposal 1<br>Azure OpenAI"]
         SAN["Scoring Agent<br>Proposal N<br>Azure OpenAI"]
     end
     
-    SA1 --> EV1["Evaluation V2<br>Vendor 1"]
-    SAN --> EVN["Evaluation V2<br>Vendor N"]
+    SA1 --> EV1["Evaluation<br>Vendor 1"]
+    SAN --> EVN["Evaluation<br>Vendor N"]
     
     EV1 & EVN --> CA
     
@@ -516,7 +518,7 @@ flowchart TB
 
 When a document exceeds the model's context window (configurable via `MAX_CONTEXT_TOKENS` env var, default 1,050,000 tokens), the system automatically splits it into manageable chunks and processes them using a map-reduce pattern.
 
-#### Scoring Agent V2 — Map-Reduce Chunked Processing
+#### Scoring Agent — Map-Reduce Chunked Processing
 
 ```mermaid
 flowchart TB
@@ -593,26 +595,6 @@ flowchart TB
 
     style Extract fill:#fff3e0,stroke:#ef6c00
     style Merge fill:#e8f5e9,stroke:#2e7d32
-```
-
-#### Scoring Agent V1 — Truncation Strategy
-
-The legacy scoring agent uses a simpler truncation approach for oversized documents:
-
-```mermaid
-flowchart TB
-    Doc["📄 Combined RFP + Proposal"]
-    Doc --> Check{"Combined tokens ≤<br>context budget?"}
-
-    Check -- Yes --> Direct["✅ Send full content<br>to LLM"]
-
-    Check -- No --> Budget["📐 Calculate budgets:<br>Proposal = 60% of budget<br>RFP = 40% of budget"]
-    Budget --> TruncP["✂️ Truncate proposal<br>at paragraph/sentence boundary"]
-    Budget --> TruncR["✂️ Truncate RFP<br>at paragraph/sentence boundary"]
-    TruncP --> Send["📤 Send truncated content<br>to LLM"]
-    TruncR --> Send
-
-    style Budget fill:#fff3e0,stroke:#ef6c00
 ```
 
 ---
@@ -830,7 +812,7 @@ classDiagram
         +List~str~ gaps
     }
     
-    class ProposalEvaluationV2 {
+    class ProposalEvaluation {
         +str rfp_title
         +str supplier_name
         +str supplier_site
@@ -871,7 +853,7 @@ classDiagram
     }
     
     ExtractedCriteria "1" *-- "*" ScoringCriterion
-    ProposalEvaluationV2 "1" *-- "*" CriterionScore
+    ProposalEvaluation "1" *-- "*" CriterionScore
     ComparisonResult "1" *-- "*" VendorRanking
 ```
 
@@ -896,7 +878,7 @@ classDiagram
     class ProposalScoringAgent {
         +AzureOpenAIResponsesClient client
         +str model
-        +score_proposal(proposal, criteria) ProposalEvaluationV2
+        +score_proposal(proposal, criteria) ProposalEvaluation
     }
     
     class ComparisonAgent {
@@ -915,7 +897,7 @@ classDiagram
     
     DocumentProcessor --> ExtractionService
     CriteriaExtractionAgent --> ExtractedCriteria
-    ProposalScoringAgent --> ProposalEvaluationV2
+    ProposalScoringAgent --> ProposalEvaluation
     ComparisonAgent --> ComparisonResult
 ```
 
@@ -945,16 +927,17 @@ sequenceDiagram
     CU-->>DP: Markdown content
     DP-->>UI: Store extracted content
     
-    User->>UI: Click "Evaluate"
+    User->>UI: Click "Extract Criteria"
     UI->>CEA: Extract criteria from RFP
     CEA->>AOAI: Structured output request
     AOAI-->>CEA: ExtractedCriteria
-    CEA-->>UI: Criteria extracted
+    CEA-->>UI: Display criteria for review
     
+    User->>UI: Review criteria & Click "Score"
     loop For each proposal
         UI->>PSA: Score proposal
         PSA->>AOAI: Structured output request
-        AOAI-->>PSA: ProposalEvaluationV2
+        AOAI-->>PSA: ProposalEvaluation
         PSA-->>UI: Evaluation complete
     end
     

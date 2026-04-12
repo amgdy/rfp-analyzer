@@ -19,18 +19,21 @@ RFP Analyzer automates the complex process of evaluating vendor proposals agains
 
 ## ✨ Features
 
-### 3-Step Workflow
+### 4-Step Workflow
 
 1. **📤 Upload Documents**
    - Upload your RFP document (PDF, DOCX, or images)
    - Upload multiple vendor proposals for comparison
 
-2. **⚙️ Configure & Extract**
+2. **⚙️ Extract Content**
    - Choose extraction service (Azure Content Understanding or Document Intelligence)
    - Extract structured content from all documents
 
-3. **🤖 AI-Powered Evaluation**
-   - Automatic criteria extraction from RFP
+3. **📋 Review Criteria**
+   - AI-extracted evaluation criteria with weights
+   - Review and confirm before scoring
+
+4. **🤖 AI-Powered Evaluation**
    - Score each proposal against identified criteria
    - Generate comparative rankings and recommendations
 
@@ -281,7 +284,7 @@ rfp-analyzer/
 │       ├── document_processor.py     # Document extraction orchestrator
 │       ├── content_understanding_client.py  # Azure Content Understanding
 │       ├── document_intelligence_client.py  # Azure Document Intelligence
-│       ├── scoring_agent_v2.py       # Multi-agent scoring system
+│       ├── scoring_agent.py       # Multi-agent scoring system
 │       ├── comparison_agent.py       # Vendor comparison agent
 │       ├── processing_queue.py       # Async processing queue
 │       └── logging_config.py         # Centralized logging configuration
@@ -331,11 +334,17 @@ The application supports multiple Azure OpenAI models:
 3. Wait for processing (progress shown for each document)
 4. Review extracted content in the expandable sections
 
-### Step 3: Evaluate & Compare
+### Step 3: Review Criteria
 
-1. Click "Start Evaluation" to begin AI analysis
+1. Click "Extract Criteria" to analyze the RFP
+2. The AI will identify evaluation criteria and assign weights
+3. Review the extracted criteria and weights
+4. Confirm or adjust before proceeding to scoring
+
+### Step 4: Score & Compare
+
+1. Click "Score Proposals" to begin AI evaluation
 2. The system will:
-   - Extract evaluation criteria from the RFP
    - Score each vendor against the criteria
    - Generate a comparative ranking
 3. Review results in the tabbed interface:
@@ -343,7 +352,7 @@ The application supports multiple Azure OpenAI models:
    - **Individual Reports**: Detailed scores per vendor
    - **Comparison Matrix**: Side-by-side criterion comparison
 
-### Step 4: Export Results
+### Step 5: Export Results
 
 Download results in your preferred format:
 - **CSV**: For spreadsheet analysis

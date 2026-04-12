@@ -195,7 +195,7 @@ app/
 ├── services/
 │   ├── __init__.py
 │   ├── document_processor.py  # Document handling
-│   ├── scoring_agent_v2.py    # Scoring agents
+│   ├── scoring_agent.py    # Scoring agents
 │   ├── comparison_agent.py    # Comparison agent
 │   └── your_new_service.py    # New services go here
 └── tests/
@@ -230,7 +230,7 @@ Example test:
 
 ```python
 import pytest
-from services.scoring_agent_v2 import CriteriaExtractionAgent, ExtractedCriteria
+from services.scoring_agent import CriteriaExtractionAgent, ExtractedCriteria
 
 class TestCriteriaExtractionAgent:
     """Tests for the Criteria Extraction Agent."""
