@@ -269,6 +269,14 @@ module rfpAnalyzer 'br/public:avm/res/app/container-app:0.22.0' = {
             name: 'PORT'
             value: '8501'
           }
+          {
+            name: 'STREAMLIT_SERVER_MAX_UPLOAD_SIZE'
+            value: '500'
+          }
+          {
+            name: 'STREAMLIT_SERVER_MAX_MESSAGE_SIZE'
+            value: '500'
+          }
         ]
       }
     ]

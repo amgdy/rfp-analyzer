@@ -7,8 +7,8 @@ from ui.components import render_step_indicator
 
 logger = get_logger(__name__)
 
-# Maximum file size: 100 MB per file
-_MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024
+# Maximum file size: 500 MB per file
+_MAX_FILE_SIZE_BYTES = 500 * 1024 * 1024
 
 
 def render_step1():
@@ -33,7 +33,7 @@ def render_step1():
 
         if rfp_file is not None:
             if rfp_file.size > _MAX_FILE_SIZE_BYTES:
-                st.error(f"⚠️ File **{rfp_file.name}** exceeds the 100 MB size limit.")
+                st.error(f"⚠️ File **{rfp_file.name}** exceeds the 500 MB size limit.")
             else:
                 st.info(f"📎 **{rfp_file.name}** ({rfp_file.size / 1024:.1f} KB)")
                 if st.session_state.rfp_file is None or st.session_state.rfp_file.get('name') != rfp_file.name:
@@ -62,7 +62,7 @@ def render_step1():
             oversized = [f for f in proposal_files if f.size > _MAX_FILE_SIZE_BYTES]
             if oversized:
                 for f in oversized:
-                    st.error(f"⚠️ File **{f.name}** exceeds the 100 MB size limit.")
+                    st.error(f"⚠️ File **{f.name}** exceeds the 500 MB size limit.")
             valid_files = [f for f in proposal_files if f.size <= _MAX_FILE_SIZE_BYTES]
 
             if valid_files:

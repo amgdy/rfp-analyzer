@@ -1,9 +1,9 @@
 [server]
 # Maximum size of file uploads (in MB)
-maxUploadSize = 512
+maxUploadSize = 500
 
 # Maximum size of message that can be sent via websocket (in MB)
-maxMessageSize = 512
+maxMessageSize = 500
 
 # Enable CORS for container environments
 enableCORS = false
