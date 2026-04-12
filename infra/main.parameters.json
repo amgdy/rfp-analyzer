@@ -8,14 +8,11 @@
       "location": {
         "value": "${AZURE_LOCATION}"
       },
+      "foundryLocation": {
+        "value": "${AZURE_FOUNDRY_LOCATION=${AZURE_LOCATION}}"
+      },
       "rfpAnalyzerExists": {
         "value": "${SERVICE_RFP_ANALYZER_RESOURCE_EXISTS=false}"
-      },
-      "principalId": {
-        "value": "${AZURE_PRINCIPAL_ID}"
-      },
-      "principalType": {
-        "value": "${AZURE_PRINCIPAL_TYPE}"
       }
     }
 }

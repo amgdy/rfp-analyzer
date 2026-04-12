@@ -92,7 +92,7 @@ module foundryAccount 'br/public:avm/res/cognitive-services/account:0.14.2' = {
   params:{
     name: foundryAccountName
     kind: 'AIServices'
-    location: location
+    location: foundryLocation
     tags: tags
     networkAcls: {
       defaultAction: 'Allow'
@@ -109,19 +109,10 @@ module foundryAccount 'br/public:avm/res/cognitive-services/account:0.14.2' = {
   }
 }
 
-// Get existing Foundry Account Resource
-resource foundryAccountResource 'Microsoft.CognitiveServices/accounts@2025-09-01' existing = {
-  name: foundryAccountName
-  dependsOn: [
-    foundryAccount
-  ]
-}
-
 // Microsoft Foundry Project Resource
 resource foundryProject 'Microsoft.CognitiveServices/accounts/projects@2025-09-01' = {
-  name: foundryProjectName
-  parent: foundryAccountResource
-  location: location
+  name: '${foundryAccountName}/${foundryProjectName}'
+  location: foundryLocation
   identity: {
     type: 'SystemAssigned'
   }
@@ -129,6 +120,9 @@ resource foundryProject 'Microsoft.CognitiveServices/accounts/projects@2025-09-0
     displayName: foundryProjectName
     description: 'RFP Analyzer Foundry Project'
   }
+  dependsOn: [
+    foundryAccount
+  ]
 }
 
 // Application Insights Connection to Foundry Project
@@ -151,7 +145,7 @@ resource appInsightsFoundryConnection 'Microsoft.CognitiveServices/accounts/proj
 }
 
 var azureOpenAiEndpoint = foundryAccount.outputs.endpoints['OpenAI Language Model Instance API']
-var documentIntelligenceEndpoint = foundryAccount.outputs.endpoints['FormRecognizer']
+var documentIntelligenceEndpoint = foundryAccount.outputs.endpoints.FormRecognizer
 var contentUnderstandingEndpoint = foundryAccount.outputs.endpoints['Content Understanding']
 
 
@@ -190,13 +184,16 @@ module containerRegistry 'br/public:avm/res/container-registry/registry:0.12.1' 
 module containerAppsEnvironment 'br/public:avm/res/app/managed-environment:0.13.1' = {
   name: 'container-apps-environment'
   params: {
-    logAnalyticsWorkspaceResourceId: monitoring.outputs.logAnalyticsWorkspaceResourceId
     name: '${abbrs.appManagedEnvironments}${resourceToken}'
     location: location
     zoneRedundant: false
     publicNetworkAccess: 'Enabled'
     tags: tags
     enableTelemetry: true
+    appLogsConfiguration: {
+      destination: 'log-analytics'
+      logAnalyticsWorkspaceResourceId: monitoring.outputs.logAnalyticsWorkspaceResourceId
+    }
   }
 }
 
