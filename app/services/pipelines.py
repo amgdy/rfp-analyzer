@@ -16,6 +16,9 @@ from .logging_config import get_logger
 
 logger = get_logger(__name__)
 
+# Vendor names returned by the LLM when it cannot identify the supplier
+_UNKNOWN_VENDOR_NAMES = {"Unknown Vendor", "Unknown", "N/A", ""}
+
 
 async def process_document(
     file_bytes: bytes,
@@ -185,8 +188,7 @@ async def score_proposal(
     }
 
     # Fall back to filename-derived vendor name when the LLM couldn't extract one
-    _UNKNOWN_NAMES = {"Unknown Vendor", "Unknown", "N/A", ""}
-    if results.get("supplier_name", "") in _UNKNOWN_NAMES and proposal_filename:
+    if results.get("supplier_name", "") in _UNKNOWN_VENDOR_NAMES and proposal_filename:
         fallback_name = os.path.splitext(proposal_filename)[0]
         logger.info("Vendor name unknown — using filename as fallback: %s", fallback_name)
         results["supplier_name"] = fallback_name
