@@ -99,7 +99,7 @@ def render_step2():
         if st.button(
             "Continue to Step 3: Review Criteria →",
             type="primary",
-            use_container_width=True,
+            width="stretch",
             disabled=st.session_state.is_processing
         ):
             logger.info("User proceeding to Step 3 - Criteria Review")
@@ -110,7 +110,7 @@ def render_step2():
         if st.button(
             "🔍 Extract Document Content",
             type="primary",
-            use_container_width=True,
+            width="stretch",
             disabled=st.session_state.is_processing
         ):
             logger.info("User starting document extraction")

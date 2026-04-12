@@ -51,7 +51,7 @@ def render_step3():
         if st.button(
             "Continue to Step 4: Score Proposals →",
             type="primary",
-            use_container_width=True,
+            width="stretch",
             disabled=st.session_state.is_processing,
         ):
             logger.info("User proceeding to Step 4 - Scoring")
@@ -72,7 +72,7 @@ def render_step3():
         if st.button(
             "🔍 Extract Evaluation Criteria",
             type="primary",
-            use_container_width=True,
+            width="stretch",
             disabled=st.session_state.is_processing,
         ):
             logger.info("User starting criteria extraction")

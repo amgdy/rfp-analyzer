@@ -67,7 +67,7 @@ def render_step4():
         if st.button(
             "🎯 Start Evaluation",
             type="primary",
-            use_container_width=True,
+            width="stretch",
             disabled=st.session_state.is_processing
         ):
             logger.info("User starting evaluation - Mode: individual, Effort: %s, Proposals: %d",
@@ -476,7 +476,7 @@ def _render_overall_comparison_bar(evaluations: list):
         coloraxis_showscale=False
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 
 def _render_criterion_bar_chart(evaluations: list, criterion_id: str, criterion_name: str, weight: float):
@@ -531,7 +531,7 @@ def _render_criterion_bar_chart(evaluations: list, criterion_id: str, criterion_
         xaxis_tickangle=-45 if len(vendor_names) > 3 else 0
     )
 
-    st.plotly_chart(fig, use_container_width=True, key=f"bar_{criterion_id}")
+    st.plotly_chart(fig, width="stretch", key=f"bar_{criterion_id}")
 
 
 def _render_criterion_recommendations(comparison: dict, evaluations: list):
@@ -795,7 +795,7 @@ def render_export_options(comparison: dict, evaluations: list):
                 data=full_report,
                 file_name="rfp_full_analysis_report.docx",
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                use_container_width=True,
+                width="stretch",
                 key="full_analysis_report"
             )
         else:
@@ -815,7 +815,7 @@ def render_export_options(comparison: dict, evaluations: list):
                 data=csv_content,
                 file_name="vendor_comparison.csv",
                 mime="text/csv",
-                use_container_width=True
+                width="stretch"
             )
 
     with col2:
@@ -829,7 +829,7 @@ def render_export_options(comparison: dict, evaluations: list):
             data=json.dumps(full_data, indent=2),
             file_name="evaluation_data.json",
             mime="application/json",
-            use_container_width=True
+            width="stretch"
         )
 
     with col3:
@@ -852,7 +852,7 @@ def render_export_options(comparison: dict, evaluations: list):
                     data=word_doc,
                     file_name=f"report_{vendor_name}.docx",
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    use_container_width=True,
+                    width="stretch",
                     key=f"word_{i}"
                 )
             else:

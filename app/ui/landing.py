@@ -165,7 +165,7 @@ def render_landing_page():
         if st.button(
             "🚀 Start Analysis",
             type="primary",
-            use_container_width=True,
+            width="stretch",
             disabled=st.session_state.is_processing,
             help="Click to begin the RFP analysis process"
         ):

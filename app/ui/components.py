@@ -163,7 +163,7 @@ def render_sidebar():
             # Reset button
             if st.button(
                 "🔄 Start Over",
-                use_container_width=True,
+                width="stretch",
                 disabled=st.session_state.is_processing,
             ):
                 logger.info("User initiated application reset")
@@ -242,7 +242,7 @@ def render_results(results: dict):
             data=report_md,
             file_name=f"rfp_score_report_{response_id}.md",
             mime="text/markdown",
-            use_container_width=True,
+            width="stretch",
             help="Download the report as a Markdown file",
         )
 
@@ -252,7 +252,7 @@ def render_results(results: dict):
             data=json.dumps(results, indent=2),
             file_name=f"rfp_score_report_{response_id}.json",
             mime="application/json",
-            use_container_width=True,
+            width="stretch",
             help="Download the raw data as JSON",
         )
 
@@ -300,7 +300,7 @@ def render_results_v2(results: dict):
             data=report_md,
             file_name=f"rfp_score_report_v2_{response_id}.md",
             mime="text/markdown",
-            use_container_width=True,
+            width="stretch",
         )
 
     with col2:
@@ -309,7 +309,7 @@ def render_results_v2(results: dict):
             data=json.dumps(results, indent=2),
             file_name=f"rfp_score_report_v2_{response_id}.json",
             mime="application/json",
-            use_container_width=True,
+            width="stretch",
         )
 
 
@@ -471,7 +471,7 @@ def render_extracted_criteria(results: dict):
                 }
             )
 
-        st.dataframe(criteria_data, use_container_width=True)
+        st.dataframe(criteria_data, width="stretch")
 
         # Detailed view in expander
         with st.expander("📋 Detailed Criteria Descriptions", expanded=False):
