@@ -327,6 +327,7 @@ Respond with ONLY valid JSON matching the schema in your instructions."""
             if progress_callback:
                 progress_callback("Extracting and analyzing criteria...")
 
+            # Lambda ensures a fresh coroutine is created on each retry attempt
             result = await run_with_retry(
                 lambda: agent.run(user_prompt),
                 description="Criteria extraction",

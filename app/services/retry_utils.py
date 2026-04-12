@@ -1,6 +1,6 @@
 """Retry utilities for resilient OpenAI / Azure API calls.
 
-Provides a centralised retry wrapper used by all agent modules
+Provides a centralized retry wrapper used by all agent modules
 (scoring, criteria extraction, comparison) to handle transient
 failures such as rate-limits, timeouts, and intermittent server errors.
 """
@@ -101,7 +101,7 @@ async def run_with_retry(
     backoff = initial_backoff
     last_exc: BaseException | None = None
 
-    for attempt in range(1, max_retries + 2):  # +2 because range is exclusive
+    for attempt in range(1, max_retries + 2):  # max_retries+1 total attempts; range is exclusive
         try:
             return await coro_factory()
         except Exception as exc:
