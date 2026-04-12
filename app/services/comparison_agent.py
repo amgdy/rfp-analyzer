@@ -26,6 +26,7 @@ from .token_utils import (
     truncate_content,
 )
 from .utils import parse_json_response
+from .retry_utils import run_with_retry
 
 # Optional dependency for Word document generation
 try:
@@ -285,7 +286,10 @@ Respond with ONLY valid JSON matching the schema in your instructions."""
             if progress_callback:
                 progress_callback("Analyzing vendor comparisons...")
 
-            result = await agent.run(user_prompt)
+            result = await run_with_retry(
+                lambda: agent.run(user_prompt),
+                description="Vendor comparison",
+            )
             response_text = result.text
 
             # Log token usage

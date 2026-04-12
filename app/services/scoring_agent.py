@@ -27,6 +27,7 @@ from .token_utils import (
     split_content_by_tokens,
 )
 from .utils import parse_json_response
+from .retry_utils import run_with_retry
 
 load_dotenv()
 
@@ -326,7 +327,10 @@ Respond with ONLY valid JSON matching the schema in your instructions."""
             if progress_callback:
                 progress_callback("Extracting and analyzing criteria...")
 
-            result = await agent.run(user_prompt)
+            result = await run_with_retry(
+                lambda: agent.run(user_prompt),
+                description="Criteria extraction",
+            )
             response_text = result.text
 
             # Log token usage
@@ -410,7 +414,10 @@ Respond with ONLY valid JSON matching the schema in your instructions."""
                     },
                 )
 
-                result = await agent.run(chunk_prompt)
+                result = await run_with_retry(
+                    lambda: agent.run(chunk_prompt),
+                    description=f"Criteria extraction (chunk {i + 1}/{len(chunks)})",
+                )
                 chunk_data = self._parse_response(result.text)
                 all_criteria_data.append(chunk_data)
 
@@ -765,7 +772,10 @@ Respond with ONLY valid JSON matching the schema in your instructions."""
             if progress_callback:
                 progress_callback("Scoring proposal against criteria...")
 
-            result = await agent.run(user_prompt)
+            result = await run_with_retry(
+                lambda: agent.run(user_prompt),
+                description="Proposal scoring",
+            )
             response_text = result.text
 
             # Log token usage
@@ -858,7 +868,10 @@ Respond with ONLY valid JSON matching the schema in your instructions."""
                     },
                 )
 
-                result = await agent.run(chunk_prompt)
+                result = await run_with_retry(
+                    lambda: agent.run(chunk_prompt),
+                    description=f"Proposal scoring (chunk {i + 1}/{len(chunks)})",
+                )
                 chunk_data = self._parse_response(result.text, criteria)
                 chunk_evaluations.append(chunk_data)
 
