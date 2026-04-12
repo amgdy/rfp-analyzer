@@ -1,3 +1,7 @@
 {
-    "python.defaultInterpreterPath": "${workspaceFolder}/app/.venv/bin/python"
+    "python.defaultInterpreterPath": "${workspaceFolder}/app/.venv/bin/python",
+    "python.terminal.useEnvFile": true,
+    "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff"
+  }
 }
