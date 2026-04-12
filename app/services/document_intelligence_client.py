@@ -23,6 +23,7 @@ from azure.identity import DefaultAzureCredential
 from dotenv import load_dotenv
 
 from .logging_config import get_logger
+from .token_utils import estimate_token_count
 
 load_dotenv()
 
@@ -180,7 +181,7 @@ class AzureDocumentIntelligenceClient:
             )
 
             # Log content size with estimated token count
-            estimated_tokens = int(len(markdown_content) / 3.5)
+            estimated_tokens = estimate_token_count(markdown_content)
             logger.info(
                 "[REQ:%s] Extracted %d characters (~%d tokens) of markdown content",
                 request_id,
