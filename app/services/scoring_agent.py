@@ -504,6 +504,12 @@ Respond with ONLY valid JSON matching the schema in your instructions."""
 
     def _parse_response(self, response_text: str) -> dict:
         """Parse the agent response into a dictionary."""
+        # Raise on empty/None so the caller's retry logic can kick in
+        if not response_text or not response_text.strip():
+            raise RuntimeError(
+                "Model returned empty response text — cannot extract criteria"
+            )
+
         try:
             data = parse_json_response(response_text)
 
@@ -1005,6 +1011,12 @@ Respond with ONLY valid JSON matching the schema in your instructions."""
 
     def _parse_response(self, response_text: str, criteria: ExtractedCriteria) -> dict:
         """Parse the agent response into a dictionary."""
+        # Raise on empty/None so the caller's retry logic can kick in
+        if not response_text or not response_text.strip():
+            raise RuntimeError(
+                "Model returned empty response text — cannot score proposal"
+            )
+
         try:
             data = parse_json_response(response_text)
 

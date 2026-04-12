@@ -44,6 +44,21 @@ class TestParseJsonResponse:
         with pytest.raises(json.JSONDecodeError):
             parse_json_response("not json at all")
 
+    def test_empty_string_raises(self):
+        """Raise JSONDecodeError on empty string."""
+        with pytest.raises(json.JSONDecodeError, match="Empty response text"):
+            parse_json_response("")
+
+    def test_none_raises(self):
+        """Raise JSONDecodeError on None input."""
+        with pytest.raises(json.JSONDecodeError, match="Empty response text"):
+            parse_json_response(None)
+
+    def test_whitespace_only_raises(self):
+        """Raise JSONDecodeError on whitespace-only string."""
+        with pytest.raises(json.JSONDecodeError, match="Empty response text"):
+            parse_json_response("   \n  ")
+
     def test_empty_json_object(self):
         """Parse an empty JSON object."""
         assert parse_json_response("{}") == {}

@@ -17,6 +17,12 @@ def parse_json_response(text: str) -> dict[str, Any]:
     Raises:
         json.JSONDecodeError: If the text is not valid JSON after stripping
     """
+    if not text or not text.strip():
+        raise json.JSONDecodeError(
+            "Empty response text — the model returned no content",
+            doc=text or "",
+            pos=0,
+        )
     text = text.strip()
 
     if text.startswith("```json"):

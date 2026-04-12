@@ -165,6 +165,16 @@ class TestCriteriaExtractionAgentParse:
         assert result["rfp_title"] == "Unknown RFP"
         assert result["criteria"] == []
 
+    def test_parse_empty_response_raises(self, agent):
+        """Empty model response should raise so retry can kick in."""
+        with pytest.raises(RuntimeError, match="empty response text"):
+            agent._parse_response("")
+
+    def test_parse_none_response_raises(self, agent):
+        """None model response should raise so retry can kick in."""
+        with pytest.raises(RuntimeError, match="empty response text"):
+            agent._parse_response(None)
+
 
 # ============================================================================
 # _parse_response tests (ProposalScoringAgent)
@@ -251,6 +261,16 @@ class TestProposalScoringAgentParse:
         assert result["rfp_title"] == "Test RFP"
         assert result["grade"] == "F"
         assert result["total_score"] == 0
+
+    def test_parse_empty_response_raises(self, agent, criteria):
+        """Empty model response should raise so retry can kick in."""
+        with pytest.raises(RuntimeError, match="empty response text"):
+            agent._parse_response("", criteria)
+
+    def test_parse_none_response_raises(self, agent, criteria):
+        """None model response should raise so retry can kick in."""
+        with pytest.raises(RuntimeError, match="empty response text"):
+            agent._parse_response(None, criteria)
 
     def test_parse_sets_evaluation_date_if_missing(self, agent, criteria):
         response = json.dumps({"criterion_scores": []})

@@ -362,6 +362,12 @@ Respond with ONLY valid JSON matching the schema in your instructions."""
 
     def _parse_response(self, response_text: str) -> Dict[str, Any]:
         """Parse the agent response."""
+        # Raise on empty/None so the caller's retry logic can kick in
+        if not response_text or not response_text.strip():
+            raise RuntimeError(
+                "Model returned empty response text — cannot compare vendors"
+            )
+
         try:
             return parse_json_response(response_text)
         except json.JSONDecodeError as e:
