@@ -3,7 +3,7 @@
 import json
 import pytest
 
-from services.utils import parse_json_response, format_duration, clean_extracted_text
+from services.utils import parse_json_response, format_duration, clean_extracted_text, clean_extracted_markdown
 
 
 # ============================================================================
@@ -214,3 +214,48 @@ class TestCleanExtractedText:
         assert "&amp;" not in result
         assert "Hello" in result
         assert "Goodbye" in result
+
+
+# ============================================================================
+# clean_extracted_markdown tests
+# ============================================================================
+
+
+class TestCleanExtractedMarkdown:
+    """Tests for clean_extracted_markdown utility."""
+
+    def test_empty_string(self):
+        assert clean_extracted_markdown("") == ""
+
+    def test_none_returns_empty(self):
+        assert clean_extracted_markdown(None) == ""
+
+    def test_collapses_excessive_blank_lines(self):
+        text = "Line 1\n\n\n\n\n\nLine 2"
+        result = clean_extracted_markdown(text)
+        assert "\n\n\n\n" not in result
+        assert "Line 1" in result and "Line 2" in result
+
+    def test_ensures_blank_line_before_header(self):
+        text = "Some paragraph text\n# Header"
+        result = clean_extracted_markdown(text)
+        assert "\n\n# Header" in result
+
+    def test_normalises_non_breaking_spaces(self):
+        text = "Hello\u00a0World"
+        result = clean_extracted_markdown(text)
+        assert "\u00a0" not in result
+        assert "Hello World" in result
+
+    def test_strips_trailing_whitespace(self):
+        text = "Line 1   \nLine 2  "
+        result = clean_extracted_markdown(text)
+        for line in result.split("\n"):
+            assert line == line.rstrip()
+
+    def test_preserves_markdown_formatting(self):
+        text = "# Header\n\n**bold** and *italic*\n\n| col1 | col2 |\n|---|---|\n| a | b |"
+        result = clean_extracted_markdown(text)
+        assert "# Header" in result
+        assert "**bold**" in result
+        assert "| col1 | col2 |" in result

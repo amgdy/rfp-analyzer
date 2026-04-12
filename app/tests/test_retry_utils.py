@@ -2,7 +2,7 @@
 
 import asyncio
 import pytest
-from services.retry_utils import run_with_retry, _is_retryable
+from services.retry_utils import run_with_retry, _is_retryable, check_for_refusal
 
 
 # ============================================================================
@@ -207,3 +207,45 @@ class TestRunWithRetry:
             )
         # 1 initial + 1 retry = 2
         assert len(calls) == 2
+
+
+# ============================================================================
+# check_for_refusal tests
+# ============================================================================
+
+
+class TestCheckForRefusal:
+    def test_none_text_no_error(self):
+        check_for_refusal(None)
+
+    def test_empty_text_no_error(self):
+        check_for_refusal("")
+
+    def test_normal_json_no_error(self):
+        check_for_refusal('{"rfp_title": "Test"}')
+
+    def test_sorry_cannot_assist(self):
+        with pytest.raises(RuntimeError, match="cannot assist"):
+            check_for_refusal("I'm sorry, but I cannot assist with that request.")
+
+    def test_unable_to_assist(self):
+        with pytest.raises(RuntimeError, match="cannot assist"):
+            check_for_refusal("I'm unable to assist with this.")
+
+    def test_content_policy(self):
+        with pytest.raises(RuntimeError, match="cannot assist"):
+            check_for_refusal("This request violates our content policy.")
+
+    def test_case_insensitive(self):
+        with pytest.raises(RuntimeError, match="cannot assist"):
+            check_for_refusal("I'M SORRY, BUT I CANNOT ASSIST WITH THAT REQUEST.")
+
+    def test_refusal_is_retryable(self):
+        """A refusal RuntimeError should be classified as retryable."""
+        try:
+            check_for_refusal("I'm sorry, but I cannot assist with that request.")
+        except RuntimeError as exc:
+            assert _is_retryable(exc) is True
+
+    def test_cannot_assist_substring_is_retryable(self):
+        assert _is_retryable(RuntimeError("Model refusal detected — cannot assist")) is True
