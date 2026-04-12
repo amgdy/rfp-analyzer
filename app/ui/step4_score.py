@@ -10,6 +10,7 @@ from services.utils import format_duration
 from services.comparison_agent import ComparisonAgent, generate_word_report, generate_full_analysis_report
 from services.processing_queue import ProcessingQueue, QueueItemStatus
 from services.logging_config import get_logger
+from services.telemetry import get_tracer
 from ui.styles import STEP_ANIMATION_CSS
 from ui.components import render_step_indicator
 
@@ -22,6 +23,7 @@ except ImportError:
     PLOTLY_AVAILABLE = False
 
 logger = get_logger(__name__)
+tracer = get_tracer(__name__)
 
 
 def render_step4():
@@ -99,230 +101,240 @@ def run_evaluation_pipeline():
     logger.info("====== SCORING PIPELINE STARTED (Effort: %s) ======", reasoning_effort)
     pipeline_start = time.time()
 
-    # Inject animation CSS
-    st.markdown(STEP_ANIMATION_CSS, unsafe_allow_html=True)
+    with tracer.start_as_current_span("scoring_pipeline") as pipeline_span:
+        pipeline_span.set_attribute("pipeline.type", "scoring")
+        pipeline_span.set_attribute("pipeline.reasoning_effort", reasoning_effort)
+        pipeline_span.set_attribute("pipeline.proposal_count", len(st.session_state.proposal_files))
 
-    # Create scoring queue
-    scoring_queue = ProcessingQueue(name="Proposal Scoring")
-    proposal_files = st.session_state.proposal_files
+        # Inject animation CSS
+        st.markdown(STEP_ANIMATION_CSS, unsafe_allow_html=True)
 
-    # Add each proposal as a separate queue item with unique request ID
-    for i, proposal_file in enumerate(proposal_files):
-        request_id = str(uuid.uuid4())[:8]
-        scoring_queue.add_item(
-            id=f"proposal_{i}",
-            name=proposal_file['name'],
-            item_type="evaluation",
-            metadata={
-                "filename": proposal_file["name"],
-                "request_id": request_id
-            }
-        )
-        logger.info("Queued proposal for scoring: %s (request_id: %s)",
-                   proposal_file['name'], request_id)
+        # Create scoring queue
+        scoring_queue = ProcessingQueue(name="Proposal Scoring")
+        proposal_files = st.session_state.proposal_files
 
-    # Add comparison step if multiple proposals
-    if len(proposal_files) > 1:
-        comparison_request_id = str(uuid.uuid4())[:8]
-        scoring_queue.add_item(
-            id="comparison",
-            name="Vendor Comparison",
-            item_type="comparison",
-            metadata={"request_id": comparison_request_id}
-        )
-        logger.info("Queued vendor comparison (request_id: %s)", comparison_request_id)
-
-    scoring_queue.start()
-    st.session_state.scoring_queue = scoring_queue
-
-    # UI Setup - single placeholder for clean updates
-    st.subheader("🎯 Evaluating Proposals")
-    status_placeholder = st.empty()
-
-    def render_status():
-        """Render the current scoring status."""
-        with status_placeholder.container():
-            elapsed = time.time() - pipeline_start
-            st.markdown(f"**⏱️ Elapsed: `{format_duration(elapsed)}`**")
-
-            # Progress bar
-            progress = scoring_queue.get_progress()
-            st.progress(progress["percentage"] / 100)
-
-            # Items status
-            for item in scoring_queue.items:
-                icon = item.get_status_icon()
-                elapsed_time = format_duration(item.get_elapsed_time()) if item.start_time else "-"
-
-                if item.item_type == "comparison":
-                    label = f"📊 {item.name}"
-                else:
-                    label = f"📝 {item.name}"
-
-                if item.status == QueueItemStatus.COMPLETED:
-                    extra = ""
-                    if item.result and isinstance(item.result, dict) and "total_score" in item.result:
-                        score = item.result["total_score"]
-                        grade = item.result.get("grade", "")
-                        extra = f" — Score: **{score:.1f}** ({grade})"
-                    st.success(f"{icon} {label}{extra} — `{elapsed_time}`")
-                elif item.status == QueueItemStatus.PROCESSING:
-                    st.info(f"{icon} {label} — Processing... `{elapsed_time}`")
-                elif item.status == QueueItemStatus.FAILED:
-                    st.error(f"{icon} {label} — Failed: {item.error_message}")
-                else:
-                    st.warning(f"{icon} {label} — Waiting...")
-
-    try:
-        evaluation_results = []
-
-        # Mark all proposal items as processing
-        for i in range(len(proposal_files)):
-            item = scoring_queue.get_item(f"proposal_{i}")
-            item.start()
-
-        render_status()
-
-        # Define async function for parallel proposal scoring
-        async def score_all_proposals():
-            tasks = []
-            for i, proposal_file in enumerate(proposal_files):
-                proposal_name = proposal_file["name"]
-                proposal_content = st.session_state.proposal_contents.get(proposal_name, "")
-
-                task = score_proposal(
-                    extracted_criteria,
-                    proposal_content,
-                    reasoning_effort=reasoning_effort,
-                    proposal_filename=proposal_name,
-                )
-                tasks.append(task)
-            return await asyncio.gather(*tasks, return_exceptions=True)
-
-        # Run parallel scoring
-        results = asyncio.run(score_all_proposals())
-
-        # Process results
-        for i, result in enumerate(results):
-            proposal_name = proposal_files[i]["name"]
-            item = scoring_queue.get_item(f"proposal_{i}")
-
-            if isinstance(result, Exception):
-                item.fail(str(result))
-                logger.error("Failed to evaluate %s: %s", proposal_name, str(result))
-            else:
-                eval_result, duration = result
-                eval_result["_proposal_file"] = proposal_name
-                evaluation_results.append(eval_result)
-                item.complete(result=eval_result)
-                st.session_state.step_durations[f"eval_{proposal_name}"] = duration
-                logger.info("Proposal %s evaluated in %.2fs", proposal_name, duration)
-
-        render_status()
-
-        # Check for failures using get_failed_items
-        failed_items = scoring_queue.get_failed_items()
-        if failed_items:
-            raise Exception(f"Failed to evaluate {len(failed_items)} proposal(s)")
-
-        # Separate qualified proposals from disqualified documents
-        qualified_results = [
-            r for r in evaluation_results
-            if r.get("is_qualified_proposal", True)
-        ]
-        disqualified_results = [
-            r for r in evaluation_results
-            if not r.get("is_qualified_proposal", True)
-        ]
-
-        if disqualified_results:
-            logger.info(
-                "%d document(s) disqualified as non-proposals: %s",
-                len(disqualified_results),
-                [r.get("_proposal_file", "?") for r in disqualified_results],
+        # Add each proposal as a separate queue item with unique request ID
+        for i, proposal_file in enumerate(proposal_files):
+            request_id = str(uuid.uuid4())[:8]
+            scoring_queue.add_item(
+                id=f"proposal_{i}",
+                name=proposal_file['name'],
+                item_type="evaluation",
+                metadata={
+                    "filename": proposal_file["name"],
+                    "request_id": request_id
+                }
             )
+            logger.info("Queued proposal for scoring: %s (request_id: %s)",
+                       proposal_file['name'], request_id)
 
-        st.session_state.evaluation_results = qualified_results
-        st.session_state.disqualified_results = disqualified_results
+        # Add comparison step if multiple proposals
+        if len(proposal_files) > 1:
+            comparison_request_id = str(uuid.uuid4())[:8]
+            scoring_queue.add_item(
+                id="comparison",
+                name="Vendor Comparison",
+                item_type="comparison",
+                metadata={"request_id": comparison_request_id}
+            )
+            logger.info("Queued vendor comparison (request_id: %s)", comparison_request_id)
 
-        # Compare results if multiple qualified proposals
-        if len(qualified_results) > 1:
-            comparison_item = scoring_queue.get_item("comparison")
-            comparison_item.start()
+        scoring_queue.start()
+        st.session_state.scoring_queue = scoring_queue
+
+        # UI Setup - single placeholder for clean updates
+        st.subheader("🎯 Evaluating Proposals")
+        status_placeholder = st.empty()
+
+        def render_status():
+            """Render the current scoring status."""
+            with status_placeholder.container():
+                elapsed = time.time() - pipeline_start
+                st.markdown(f"**⏱️ Elapsed: `{format_duration(elapsed)}`**")
+
+                # Progress bar
+                progress = scoring_queue.get_progress()
+                st.progress(progress["percentage"] / 100)
+
+                # Items status
+                for item in scoring_queue.items:
+                    icon = item.get_status_icon()
+                    elapsed_time = format_duration(item.get_elapsed_time()) if item.start_time else "-"
+
+                    if item.item_type == "comparison":
+                        label = f"📊 {item.name}"
+                    else:
+                        label = f"📝 {item.name}"
+
+                    if item.status == QueueItemStatus.COMPLETED:
+                        extra = ""
+                        if item.result and isinstance(item.result, dict) and "total_score" in item.result:
+                            score = item.result["total_score"]
+                            grade = item.result.get("grade", "")
+                            extra = f" — Score: **{score:.1f}** ({grade})"
+                        st.success(f"{icon} {label}{extra} — `{elapsed_time}`")
+                    elif item.status == QueueItemStatus.PROCESSING:
+                        st.info(f"{icon} {label} — Processing... `{elapsed_time}`")
+                    elif item.status == QueueItemStatus.FAILED:
+                        st.error(f"{icon} {label} — Failed: {item.error_message}")
+                    else:
+                        st.warning(f"{icon} {label} — Waiting...")
+
+        try:
+            evaluation_results = []
+
+            # Mark all proposal items as processing
+            for i in range(len(proposal_files)):
+                item = scoring_queue.get_item(f"proposal_{i}")
+                item.start()
 
             render_status()
 
-            try:
-                comparison_agent = ComparisonAgent()
-                rfp_title = evaluation_results[0].get("rfp_title", "RFP Evaluation")
+            # Define async function for parallel proposal scoring
+            async def score_all_proposals():
+                tasks = []
+                for i, proposal_file in enumerate(proposal_files):
+                    proposal_name = proposal_file["name"]
+                    proposal_content = st.session_state.proposal_contents.get(proposal_name, "")
 
-                comparison_results = asyncio.run(
-                    comparison_agent.compare_evaluations(
-                        qualified_results,
-                        rfp_title,
-                        reasoning_effort=reasoning_effort
+                    task = score_proposal(
+                        extracted_criteria,
+                        proposal_content,
+                        reasoning_effort=reasoning_effort,
+                        proposal_filename=proposal_name,
                     )
+                    tasks.append(task)
+                return await asyncio.gather(*tasks, return_exceptions=True)
+
+            # Run parallel scoring
+            results = asyncio.run(score_all_proposals())
+
+            # Process results
+            for i, result in enumerate(results):
+                proposal_name = proposal_files[i]["name"]
+                item = scoring_queue.get_item(f"proposal_{i}")
+
+                if isinstance(result, Exception):
+                    item.fail(str(result))
+                    logger.error("Failed to evaluate %s: %s", proposal_name, str(result))
+                else:
+                    eval_result, duration = result
+                    eval_result["_proposal_file"] = proposal_name
+                    evaluation_results.append(eval_result)
+                    item.complete(result=eval_result)
+                    st.session_state.step_durations[f"eval_{proposal_name}"] = duration
+                    logger.info("Proposal %s evaluated in %.2fs", proposal_name, duration)
+
+            render_status()
+
+            # Check for failures using get_failed_items
+            failed_items = scoring_queue.get_failed_items()
+            if failed_items:
+                raise Exception(f"Failed to evaluate {len(failed_items)} proposal(s)")
+
+            # Separate qualified proposals from disqualified documents
+            qualified_results = [
+                r for r in evaluation_results
+                if r.get("is_qualified_proposal", True)
+            ]
+            disqualified_results = [
+                r for r in evaluation_results
+                if not r.get("is_qualified_proposal", True)
+            ]
+
+            if disqualified_results:
+                logger.info(
+                    "%d document(s) disqualified as non-proposals: %s",
+                    len(disqualified_results),
+                    [r.get("_proposal_file", "?") for r in disqualified_results],
                 )
 
-                st.session_state.comparison_results = comparison_results
-                comparison_item.complete(result=comparison_results)
-                logger.info("Comparison completed")
+            st.session_state.evaluation_results = qualified_results
+            st.session_state.disqualified_results = disqualified_results
 
-            except Exception as e:
-                comparison_item.fail(str(e))
-                raise
-        else:
-            # Single proposal - create basic comparison structure
-            if qualified_results:
-                st.session_state.comparison_results = {
-                    "rfp_title": qualified_results[0].get("rfp_title", "RFP Evaluation"),
-                    "total_vendors": len(qualified_results),
-                    "vendor_rankings": [{
-                        "rank": 1,
-                        "vendor_name": qualified_results[0].get("supplier_name", "Unknown"),
-                        "total_score": qualified_results[0].get("total_score", 0),
-                        "grade": qualified_results[0].get("grade", "N/A"),
-                        "key_strengths": qualified_results[0].get("overall_strengths", [])[:3],
-                        "key_concerns": qualified_results[0].get("overall_weaknesses", [])[:3],
-                        "recommendation": qualified_results[0].get("recommendation", "")
-                    }],
-                    "selection_recommendation": qualified_results[0].get("recommendation", ""),
-                    "comparison_insights": []
-                }
-            elif disqualified_results:
-                # All proposals were disqualified
-                st.session_state.comparison_results = {
-                    "rfp_title": disqualified_results[0].get("rfp_title", "RFP Evaluation"),
-                    "total_vendors": 0,
-                    "vendor_rankings": [],
-                    "selection_recommendation": "No qualified proposals to compare.",
-                    "comparison_insights": []
-                }
+            # Compare results if multiple qualified proposals
+            if len(qualified_results) > 1:
+                comparison_item = scoring_queue.get_item("comparison")
+                comparison_item.start()
 
-        scoring_queue.finish()
-        st.session_state.scoring_queue = scoring_queue
+                render_status()
 
-        total_duration = time.time() - pipeline_start
-        st.session_state.step_durations["evaluation_total"] = total_duration
+                try:
+                    comparison_agent = ComparisonAgent()
+                    rfp_title = evaluation_results[0].get("rfp_title", "RFP Evaluation")
 
-        logger.info("====== SCORING PIPELINE COMPLETED in %.2fs ======", total_duration)
+                    comparison_results = asyncio.run(
+                        comparison_agent.compare_evaluations(
+                            qualified_results,
+                            rfp_title,
+                            reasoning_effort=reasoning_effort
+                        )
+                    )
 
-        # Final render
-        render_status()
+                    st.session_state.comparison_results = comparison_results
+                    comparison_item.complete(result=comparison_results)
+                    logger.info("Comparison completed")
 
-        st.success(f"✅ **Evaluation complete in {format_duration(total_duration)}!**")
+                except Exception as e:
+                    comparison_item.fail(str(e))
+                    raise
+            else:
+                # Single proposal - create basic comparison structure
+                if qualified_results:
+                    st.session_state.comparison_results = {
+                        "rfp_title": qualified_results[0].get("rfp_title", "RFP Evaluation"),
+                        "total_vendors": len(qualified_results),
+                        "vendor_rankings": [{
+                            "rank": 1,
+                            "vendor_name": qualified_results[0].get("supplier_name", "Unknown"),
+                            "total_score": qualified_results[0].get("total_score", 0),
+                            "grade": qualified_results[0].get("grade", "N/A"),
+                            "key_strengths": qualified_results[0].get("overall_strengths", [])[:3],
+                            "key_concerns": qualified_results[0].get("overall_weaknesses", [])[:3],
+                            "recommendation": qualified_results[0].get("recommendation", "")
+                        }],
+                        "selection_recommendation": qualified_results[0].get("recommendation", ""),
+                        "comparison_insights": []
+                    }
+                elif disqualified_results:
+                    # All proposals were disqualified
+                    st.session_state.comparison_results = {
+                        "rfp_title": disqualified_results[0].get("rfp_title", "RFP Evaluation"),
+                        "total_vendors": 0,
+                        "vendor_rankings": [],
+                        "selection_recommendation": "No qualified proposals to compare.",
+                        "comparison_insights": []
+                    }
 
-        st.session_state.is_processing = False
-        time.sleep(1)
-        st.rerun()
+            scoring_queue.finish()
+            st.session_state.scoring_queue = scoring_queue
 
-    except Exception as e:
-        logger.error("Evaluation pipeline failed: %s", str(e))
-        scoring_queue.finish()
-        st.session_state.scoring_queue = scoring_queue
-        st.session_state.is_processing = False
-        render_status()
-        st.error("❌ Error during evaluation. Please check the logs and try again.")
+            total_duration = time.time() - pipeline_start
+            st.session_state.step_durations["evaluation_total"] = total_duration
+            pipeline_span.set_attribute("pipeline.duration_seconds", total_duration)
+            pipeline_span.set_attribute("pipeline.status", "success")
+            pipeline_span.set_attribute("pipeline.qualified_count", len(qualified_results))
+
+            logger.info("====== SCORING PIPELINE COMPLETED in %.2fs ======", total_duration)
+
+            # Final render
+            render_status()
+
+            st.success(f"✅ **Evaluation complete in {format_duration(total_duration)}!**")
+
+            st.session_state.is_processing = False
+            time.sleep(1)
+            st.rerun()
+
+        except Exception as e:
+            pipeline_span.record_exception(e)
+            pipeline_span.set_attribute("pipeline.status", "failed")
+            logger.error("Evaluation pipeline failed: %s", str(e))
+            scoring_queue.finish()
+            st.session_state.scoring_queue = scoring_queue
+            st.session_state.is_processing = False
+            render_status()
+            st.error("❌ Error during evaluation. Please check the logs and try again.")
 
 
 # ---------------------------------------------------------------------------

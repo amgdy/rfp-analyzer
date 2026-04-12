@@ -28,11 +28,13 @@ from .token_utils import (
 )
 from .utils import parse_json_response
 from .retry_utils import run_with_retry
+from .telemetry import get_tracer
 
 load_dotenv()
 
 # Get logger from centralized config
 logger = get_logger(__name__)
+tracer = get_tracer(__name__)
 
 
 # ============================================================================
@@ -264,41 +266,47 @@ You MUST respond with a valid JSON object matching this exact structure:
             rfp_tokens,
         )
 
-        if progress_callback:
-            progress_callback("Analyzing RFP structure and requirements...")
+        with tracer.start_as_current_span("CriteriaExtractionAgent.extract_criteria") as span:
+            span.set_attribute("criteria.reasoning_effort", reasoning_effort)
+            span.set_attribute("criteria.rfp_tokens", rfp_tokens)
 
-        # Calculate available budget for user content
-        budget = calculate_token_budget(self.SYSTEM_INSTRUCTIONS)
-        # Reserve tokens for the prompt template text around the RFP content
-        prompt_overhead = estimate_token_count(
-            "Please analyze the following RFP document and extract comprehensive "
-            "scoring criteria.\n\n## RFP DOCUMENT:\n\n---\n\nREQUIREMENTS:\n"
-            "1. Identify all evaluation criteria\n2. Assign weights\n"
-            "3. Provide guidance\n4. Include title and summary\n"
-            "Respond with ONLY valid JSON matching the schema."
-        )
-        content_budget = budget - prompt_overhead
+            if progress_callback:
+                progress_callback("Analyzing RFP structure and requirements...")
 
-        if rfp_tokens <= content_budget:
-            # Content fits in a single call
-            logger.info(
-                "RFP content (~%d tokens) fits within budget (%d tokens) — single-call extraction",
-                rfp_tokens,
-                content_budget,
+            # Calculate available budget for user content
+            budget = calculate_token_budget(self.SYSTEM_INSTRUCTIONS)
+            # Reserve tokens for the prompt template text around the RFP content
+            prompt_overhead = estimate_token_count(
+                "Please analyze the following RFP document and extract comprehensive "
+                "scoring criteria.\n\n## RFP DOCUMENT:\n\n---\n\nREQUIREMENTS:\n"
+                "1. Identify all evaluation criteria\n2. Assign weights\n"
+                "3. Provide guidance\n4. Include title and summary\n"
+                "Respond with ONLY valid JSON matching the schema."
             )
-            return await self._extract_criteria_single(
-                rfp_content, progress_callback, reasoning_effort, start_time
-            )
-        else:
-            # Content too large — use chunked extraction with merge
-            logger.warning(
-                "RFP content (~%d tokens) exceeds budget (%d tokens) — using chunked extraction",
-                rfp_tokens,
-                content_budget,
-            )
-            return await self._extract_criteria_chunked(
-                rfp_content, content_budget, progress_callback, reasoning_effort, start_time
-            )
+            content_budget = budget - prompt_overhead
+
+            if rfp_tokens <= content_budget:
+                # Content fits in a single call
+                logger.info(
+                    "RFP content (~%d tokens) fits within budget (%d tokens) — single-call extraction",
+                    rfp_tokens,
+                    content_budget,
+                )
+                span.set_attribute("criteria.mode", "single")
+                return await self._extract_criteria_single(
+                    rfp_content, progress_callback, reasoning_effort, start_time
+                )
+            else:
+                # Content too large — use chunked extraction with merge
+                logger.warning(
+                    "RFP content (~%d tokens) exceeds budget (%d tokens) — using chunked extraction",
+                    rfp_tokens,
+                    content_budget,
+                )
+                span.set_attribute("criteria.mode", "chunked")
+                return await self._extract_criteria_chunked(
+                    rfp_content, content_budget, progress_callback, reasoning_effort, start_time
+                )
 
     async def _extract_criteria_single(
         self,
@@ -308,7 +316,8 @@ You MUST respond with a valid JSON object matching this exact structure:
         start_time: float,
     ) -> ExtractedCriteria:
         """Extract criteria from RFP content in a single LLM call."""
-        user_prompt = f"""Please analyze the following RFP document and extract comprehensive scoring criteria.
+        with tracer.start_as_current_span("CriteriaExtractionAgent.llm_call") as span:
+            user_prompt = f"""Please analyze the following RFP document and extract comprehensive scoring criteria.
 
 ## RFP DOCUMENT:
 
@@ -324,54 +333,59 @@ REQUIREMENTS:
 
 Respond with ONLY valid JSON matching the schema in your instructions."""
 
-        try:
-            agent = Agent(
-                client=self.client,
-                instructions=self.SYSTEM_INSTRUCTIONS,
-                name="Criteria Extraction Agent",
-                default_options={
-                    "reasoning": {"effort": reasoning_effort, "summary": "detailed"}
-                },
-            )
-
-            if progress_callback:
-                progress_callback("Extracting and analyzing criteria...")
-
-            # Lambda ensures a fresh coroutine is created on each retry attempt
-            result = await run_with_retry(
-                lambda: agent.run(user_prompt),
-                description="Criteria extraction",
-            )
-            response_text = result.text
-
-            # Log token usage
-            usage = result.usage_details
-            if usage:
-                input_tokens = getattr(usage, "input_token_count", 0) or 0
-                output_tokens = getattr(usage, "output_token_count", 0) or 0
-                total_tokens = getattr(usage, "total_token_count", 0) or 0
-                logger.info(
-                    "Criteria extraction - Tokens: Input=%d, Output=%d, Total=%d",
-                    input_tokens,
-                    output_tokens,
-                    total_tokens,
+            try:
+                agent = Agent(
+                    client=self.client,
+                    instructions=self.SYSTEM_INSTRUCTIONS,
+                    name="Criteria Extraction Agent",
+                    default_options={
+                        "reasoning": {"effort": reasoning_effort, "summary": "detailed"}
+                    },
                 )
 
-            # Parse the response
-            criteria_data = self._parse_response(response_text)
+                if progress_callback:
+                    progress_callback("Extracting and analyzing criteria...")
 
-            duration = time.time() - start_time
-            logger.info(
-                "Criteria extraction completed in %.2fs - Found %d criteria",
-                duration,
-                len(criteria_data.get("criteria", [])),
-            )
+                # Lambda ensures a fresh coroutine is created on each retry attempt
+                result = await run_with_retry(
+                    lambda: agent.run(user_prompt),
+                    description="Criteria extraction",
+                )
+                response_text = result.text
 
-            return ExtractedCriteria(**criteria_data)
+                # Log token usage
+                usage = result.usage_details
+                if usage:
+                    input_tokens = getattr(usage, "input_token_count", 0) or 0
+                    output_tokens = getattr(usage, "output_token_count", 0) or 0
+                    total_tokens = getattr(usage, "total_token_count", 0) or 0
+                    logger.info(
+                        "Criteria extraction - Tokens: Input=%d, Output=%d, Total=%d",
+                        input_tokens,
+                        output_tokens,
+                        total_tokens,
+                    )
+                    span.set_attribute("llm.input_tokens", input_tokens)
+                    span.set_attribute("llm.output_tokens", output_tokens)
 
-        except Exception as e:
-            logger.error("Criteria extraction failed: %s", str(e))
-            raise
+                # Parse the response
+                criteria_data = self._parse_response(response_text)
+
+                duration = time.time() - start_time
+                span.set_attribute("criteria.count", len(criteria_data.get("criteria", [])))
+                span.set_attribute("criteria.duration_seconds", duration)
+                logger.info(
+                    "Criteria extraction completed in %.2fs - Found %d criteria",
+                    duration,
+                    len(criteria_data.get("criteria", [])),
+                )
+
+                return ExtractedCriteria(**criteria_data)
+
+            except Exception as e:
+                span.record_exception(e)
+                logger.error("Criteria extraction failed: %s", str(e))
+                raise
 
     async def _extract_criteria_chunked(
         self,
@@ -696,60 +710,67 @@ You MUST respond with a valid JSON object:
             proposal_tokens,
         )
 
-        if progress_callback:
-            progress_callback("Preparing scoring framework...")
+        with tracer.start_as_current_span("ProposalScoringAgent.score_proposal") as span:
+            span.set_attribute("scoring.reasoning_effort", reasoning_effort)
+            span.set_attribute("scoring.proposal_tokens", proposal_tokens)
+            span.set_attribute("scoring.criteria_count", len(criteria.criteria))
 
-        # Format criteria for the system instructions
-        criteria_json = json.dumps(
-            [
-                {
-                    "criterion_id": c.criterion_id,
-                    "name": c.name,
-                    "description": c.description,
-                    "category": c.category,
-                    "weight": c.weight,
-                    "max_score": c.max_score,
-                    "evaluation_guidance": c.evaluation_guidance,
-                }
-                for c in criteria.criteria
-            ],
-            indent=2,
-        )
+            if progress_callback:
+                progress_callback("Preparing scoring framework...")
 
-        system_instructions = self.SYSTEM_INSTRUCTIONS_TEMPLATE.format(
-            criteria_json=criteria_json
-        )
+            # Format criteria for the system instructions
+            criteria_json = json.dumps(
+                [
+                    {
+                        "criterion_id": c.criterion_id,
+                        "name": c.name,
+                        "description": c.description,
+                        "category": c.category,
+                        "weight": c.weight,
+                        "max_score": c.max_score,
+                        "evaluation_guidance": c.evaluation_guidance,
+                    }
+                    for c in criteria.criteria
+                ],
+                indent=2,
+            )
 
-        # Calculate available budget for proposal content
-        budget = calculate_token_budget(system_instructions)
-        # Reserve tokens for the prompt template text around the proposal
-        prompt_overhead = estimate_token_count(
-            f"Please evaluate the following vendor proposal against the scoring criteria.\n\n"
-            f"## RFP CONTEXT:\n- Title: {criteria.rfp_title}\n- Summary: {criteria.rfp_summary}\n\n"
-            f"## VENDOR PROPOSAL:\n\n---\n\nREQUIREMENTS:\n1-5...\nRespond with ONLY valid JSON."
-        )
-        content_budget = budget - prompt_overhead
+            system_instructions = self.SYSTEM_INSTRUCTIONS_TEMPLATE.format(
+                criteria_json=criteria_json
+            )
 
-        if proposal_tokens <= content_budget:
-            logger.info(
-                "Proposal (~%d tokens) fits within budget (%d tokens) — single-call scoring",
-                proposal_tokens,
-                content_budget,
+            # Calculate available budget for proposal content
+            budget = calculate_token_budget(system_instructions)
+            # Reserve tokens for the prompt template text around the proposal
+            prompt_overhead = estimate_token_count(
+                f"Please evaluate the following vendor proposal against the scoring criteria.\n\n"
+                f"## RFP CONTEXT:\n- Title: {criteria.rfp_title}\n- Summary: {criteria.rfp_summary}\n\n"
+                f"## VENDOR PROPOSAL:\n\n---\n\nREQUIREMENTS:\n1-5...\nRespond with ONLY valid JSON."
             )
-            return await self._score_proposal_single(
-                criteria, criteria_json, system_instructions, proposal_content,
-                progress_callback, reasoning_effort, start_time,
-            )
-        else:
-            logger.warning(
-                "Proposal (~%d tokens) exceeds budget (%d tokens) — using chunked scoring",
-                proposal_tokens,
-                content_budget,
-            )
-            return await self._score_proposal_chunked(
-                criteria, criteria_json, system_instructions, proposal_content,
-                content_budget, progress_callback, reasoning_effort, start_time,
-            )
+            content_budget = budget - prompt_overhead
+
+            if proposal_tokens <= content_budget:
+                logger.info(
+                    "Proposal (~%d tokens) fits within budget (%d tokens) — single-call scoring",
+                    proposal_tokens,
+                    content_budget,
+                )
+                span.set_attribute("scoring.mode", "single")
+                return await self._score_proposal_single(
+                    criteria, criteria_json, system_instructions, proposal_content,
+                    progress_callback, reasoning_effort, start_time,
+                )
+            else:
+                logger.warning(
+                    "Proposal (~%d tokens) exceeds budget (%d tokens) — using chunked scoring",
+                    proposal_tokens,
+                    content_budget,
+                )
+                span.set_attribute("scoring.mode", "chunked")
+                return await self._score_proposal_chunked(
+                    criteria, criteria_json, system_instructions, proposal_content,
+                    content_budget, progress_callback, reasoning_effort, start_time,
+                )
 
     async def _score_proposal_single(
         self,

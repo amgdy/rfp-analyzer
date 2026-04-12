@@ -11,10 +11,12 @@ import time
 
 from services.utils import format_duration
 from services.logging_config import get_logger
+from services.telemetry import get_tracer
 from ui.styles import STEP_ANIMATION_CSS
 from ui.components import render_step_indicator
 
 logger = get_logger(__name__)
+tracer = get_tracer(__name__)
 
 
 def render_step3():
@@ -214,50 +216,60 @@ def _run_criteria_extraction():
     logger.info("====== CRITERIA EXTRACTION STARTED (Effort: %s) ======", reasoning_effort)
     pipeline_start = time.time()
 
-    # Inject animation CSS
-    st.markdown(STEP_ANIMATION_CSS, unsafe_allow_html=True)
+    with tracer.start_as_current_span("criteria_extraction_pipeline") as pipeline_span:
+        pipeline_span.set_attribute("pipeline.type", "criteria_extraction")
+        pipeline_span.set_attribute("pipeline.reasoning_effort", reasoning_effort)
+        pipeline_span.set_attribute("pipeline.has_global_criteria", bool(global_criteria))
 
-    st.subheader("🔍 Extracting Evaluation Criteria")
-    status_placeholder = st.empty()
+        # Inject animation CSS
+        st.markdown(STEP_ANIMATION_CSS, unsafe_allow_html=True)
 
-    try:
-        with status_placeholder.container():
-            st.info("🤖 AI is analyzing the RFP document to extract evaluation criteria...")
-            progress_bar = st.progress(0)
+        st.subheader("🔍 Extracting Evaluation Criteria")
+        status_placeholder = st.empty()
 
-        # Run extraction
-        criteria_dict, duration = asyncio.run(
-            extract_criteria(
-                rfp_content,
-                global_criteria=global_criteria,
-                reasoning_effort=reasoning_effort,
-            )
-        )
+        try:
+            with status_placeholder.container():
+                st.info("🤖 AI is analyzing the RFP document to extract evaluation criteria...")
+                progress_bar = st.progress(0)
 
-        with status_placeholder.container():
-            progress_bar = st.progress(100)
-            criteria_count = len(criteria_dict.get("criteria", []))
-            st.success(
-                f"✅ Extracted **{criteria_count} criteria** in "
-                f"{format_duration(duration)}"
+            # Run extraction
+            criteria_dict, duration = asyncio.run(
+                extract_criteria(
+                    rfp_content,
+                    global_criteria=global_criteria,
+                    reasoning_effort=reasoning_effort,
+                )
             )
 
-        # Store results
-        st.session_state.extracted_criteria = criteria_dict
-        st.session_state.step_durations["criteria_extraction"] = duration
+            with status_placeholder.container():
+                progress_bar = st.progress(100)
+                criteria_count = len(criteria_dict.get("criteria", []))
+                st.success(
+                    f"✅ Extracted **{criteria_count} criteria** in "
+                    f"{format_duration(duration)}"
+                )
 
-        total_duration = time.time() - pipeline_start
-        logger.info(
-            "====== CRITERIA EXTRACTION COMPLETED in %.2fs - %d criteria ======",
-            total_duration,
-            len(criteria_dict.get("criteria", [])),
-        )
+            # Store results
+            st.session_state.extracted_criteria = criteria_dict
+            st.session_state.step_durations["criteria_extraction"] = duration
 
-        st.session_state.is_processing = False
-        time.sleep(1)
-        st.rerun()
+            total_duration = time.time() - pipeline_start
+            pipeline_span.set_attribute("pipeline.criteria_count", len(criteria_dict.get("criteria", [])))
+            pipeline_span.set_attribute("pipeline.duration_seconds", total_duration)
+            pipeline_span.set_attribute("pipeline.status", "success")
+            logger.info(
+                "====== CRITERIA EXTRACTION COMPLETED in %.2fs - %d criteria ======",
+                total_duration,
+                len(criteria_dict.get("criteria", [])),
+            )
 
-    except Exception as e:
-        logger.error("Criteria extraction failed: %s", str(e))
-        st.session_state.is_processing = False
-        st.error(f"❌ Error during criteria extraction: {str(e)}")
+            st.session_state.is_processing = False
+            time.sleep(1)
+            st.rerun()
+
+        except Exception as e:
+            pipeline_span.record_exception(e)
+            pipeline_span.set_attribute("pipeline.status", "failed")
+            logger.error("Criteria extraction failed: %s", str(e))
+            st.session_state.is_processing = False
+            st.error(f"❌ Error during criteria extraction: {str(e)}")

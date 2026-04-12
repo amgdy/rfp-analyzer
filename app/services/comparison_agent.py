@@ -27,6 +27,7 @@ from .token_utils import (
 )
 from .utils import parse_json_response
 from .retry_utils import run_with_retry
+from .telemetry import get_tracer
 
 # Optional dependency for Word document generation
 try:
@@ -42,6 +43,7 @@ load_dotenv()
 
 # Get logger from centralized config
 logger = get_logger(__name__)
+tracer = get_tracer(__name__)
 
 
 class VendorRanking(BaseModel):
@@ -230,31 +232,36 @@ Respond with a valid JSON object:
             reasoning_effort,
         )
 
-        if progress_callback:
-            progress_callback("Preparing vendor comparison...")
+        with tracer.start_as_current_span("ComparisonAgent.compare_evaluations") as span:
+            span.set_attribute("comparison.vendor_count", len(evaluations))
+            span.set_attribute("comparison.reasoning_effort", reasoning_effort)
+            span.set_attribute("comparison.rfp_title", rfp_title)
 
-        # Format evaluations for the prompt
-        evaluations_summary = self._format_evaluations_for_prompt(evaluations)
+            if progress_callback:
+                progress_callback("Preparing vendor comparison...")
 
-        # Check token budget and truncate if needed
-        budget = calculate_token_budget(self.SYSTEM_INSTRUCTIONS)
-        prompt_overhead = estimate_token_count(
-            f"Please compare the following vendor evaluations.\n\n"
-            f"## RFP TITLE: {rfp_title}\n\n## VENDOR EVALUATIONS:\n\n---\n\n"
-            f"REQUIREMENTS:\n1-5...\nRespond with ONLY valid JSON."
-        )
-        content_budget = budget - prompt_overhead
-        summary_tokens = estimate_token_count(evaluations_summary)
+            # Format evaluations for the prompt
+            evaluations_summary = self._format_evaluations_for_prompt(evaluations)
 
-        if summary_tokens > content_budget:
-            logger.warning(
-                "Comparison summary (~%d tokens) exceeds budget (%d tokens) — truncating",
-                summary_tokens,
-                content_budget,
+            # Check token budget and truncate if needed
+            budget = calculate_token_budget(self.SYSTEM_INSTRUCTIONS)
+            prompt_overhead = estimate_token_count(
+                f"Please compare the following vendor evaluations.\n\n"
+                f"## RFP TITLE: {rfp_title}\n\n## VENDOR EVALUATIONS:\n\n---\n\n"
+                f"REQUIREMENTS:\n1-5...\nRespond with ONLY valid JSON."
             )
-            evaluations_summary = truncate_content(evaluations_summary, content_budget)
+            content_budget = budget - prompt_overhead
+            summary_tokens = estimate_token_count(evaluations_summary)
 
-        user_prompt = f"""Please compare the following vendor evaluations and provide a comprehensive analysis.
+            if summary_tokens > content_budget:
+                logger.warning(
+                    "Comparison summary (~%d tokens) exceeds budget (%d tokens) — truncating",
+                    summary_tokens,
+                    content_budget,
+                )
+                evaluations_summary = truncate_content(evaluations_summary, content_budget)
+
+            user_prompt = f"""Please compare the following vendor evaluations and provide a comprehensive analysis.
 
 ## RFP TITLE: {rfp_title}
 
@@ -273,58 +280,62 @@ REQUIREMENTS:
 
 Respond with ONLY valid JSON matching the schema in your instructions."""
 
-        try:
-            agent = Agent(
-                client=self.client,
-                instructions=self.SYSTEM_INSTRUCTIONS,
-                name="Comparison Agent",
-                default_options={
-                    "reasoning": {"effort": reasoning_effort, "summary": "detailed"}
-                },
-            )
-
-            if progress_callback:
-                progress_callback("Analyzing vendor comparisons...")
-
-            result = await run_with_retry(
-                lambda: agent.run(user_prompt),
-                description="Vendor comparison",
-            )
-            response_text = result.text
-
-            # Log token usage
-            usage = result.usage_details
-            if usage:
-                input_tokens = getattr(usage, "input_token_count", 0) or 0
-                output_tokens = getattr(usage, "output_token_count", 0) or 0
-                total_tokens = getattr(usage, "total_token_count", 0) or 0
-                logger.info(
-                    "Comparison - Tokens: Input=%d, Output=%d, Total=%d",
-                    input_tokens,
-                    output_tokens,
-                    total_tokens,
+            try:
+                agent = Agent(
+                    client=self.client,
+                    instructions=self.SYSTEM_INSTRUCTIONS,
+                    name="Comparison Agent",
+                    default_options={
+                        "reasoning": {"effort": reasoning_effort, "summary": "detailed"}
+                    },
                 )
 
-            # Parse the response
-            comparison_data = self._parse_response(response_text)
+                if progress_callback:
+                    progress_callback("Analyzing vendor comparisons...")
 
-            duration = time.time() - start_time
-            logger.info("Comparison completed in %.2fs", duration)
+                result = await run_with_retry(
+                    lambda: agent.run(user_prompt),
+                    description="Vendor comparison",
+                )
+                response_text = result.text
 
-            # Add metadata
-            comparison_data["_metadata"] = {
-                "comparison_timestamp": datetime.now().isoformat(),
-                "total_duration_seconds": round(duration, 2),
-                "vendors_compared": len(evaluations),
-                "model_deployment": self.deployment_name,
-                "reasoning_effort": reasoning_effort,
-            }
+                # Log token usage
+                usage = result.usage_details
+                if usage:
+                    input_tokens = getattr(usage, "input_token_count", 0) or 0
+                    output_tokens = getattr(usage, "output_token_count", 0) or 0
+                    total_tokens = getattr(usage, "total_token_count", 0) or 0
+                    logger.info(
+                        "Comparison - Tokens: Input=%d, Output=%d, Total=%d",
+                        input_tokens,
+                        output_tokens,
+                        total_tokens,
+                    )
+                    span.set_attribute("llm.input_tokens", input_tokens)
+                    span.set_attribute("llm.output_tokens", output_tokens)
 
-            return comparison_data
+                # Parse the response
+                comparison_data = self._parse_response(response_text)
 
-        except Exception as e:
-            logger.error("Comparison failed: %s", str(e))
-            raise
+                duration = time.time() - start_time
+                span.set_attribute("comparison.duration_seconds", duration)
+                logger.info("Comparison completed in %.2fs", duration)
+
+                # Add metadata
+                comparison_data["_metadata"] = {
+                    "comparison_timestamp": datetime.now().isoformat(),
+                    "total_duration_seconds": round(duration, 2),
+                    "vendors_compared": len(evaluations),
+                    "model_deployment": self.deployment_name,
+                    "reasoning_effort": reasoning_effort,
+                }
+
+                return comparison_data
+
+            except Exception as e:
+                span.record_exception(e)
+                logger.error("Comparison failed: %s", str(e))
+                raise
 
     def _format_evaluations_for_prompt(self, evaluations: List[Dict[str, Any]]) -> str:
         """Format evaluations for the comparison prompt."""

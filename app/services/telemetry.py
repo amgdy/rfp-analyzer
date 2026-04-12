@@ -79,7 +79,7 @@ def setup_telemetry(
     try:
         from opentelemetry import trace
         from opentelemetry.sdk.trace import TracerProvider
-        from opentelemetry.sdk.trace.export import BatchSpanProcessor
+        from opentelemetry.sdk.trace.export import SimpleSpanProcessor
         from opentelemetry.sdk.resources import Resource, SERVICE_NAME, SERVICE_VERSION
 
         resource = Resource.create({
@@ -97,7 +97,7 @@ def setup_telemetry(
                 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 
                 otlp_exporter = OTLPSpanExporter(endpoint=otlp_endpoint, insecure=True)
-                provider.add_span_processor(BatchSpanProcessor(otlp_exporter))
+                provider.add_span_processor(SimpleSpanProcessor(otlp_exporter))
                 exporters_added += 1
                 logger.info("OTLP trace exporter configured: %s", otlp_endpoint)
             except ImportError:
@@ -112,7 +112,7 @@ def setup_telemetry(
                 from azure.monitor.opentelemetry.exporter import AzureMonitorTraceExporter
 
                 az_exporter = AzureMonitorTraceExporter(connection_string=ai_conn_str)
-                provider.add_span_processor(BatchSpanProcessor(az_exporter))
+                provider.add_span_processor(SimpleSpanProcessor(az_exporter))
                 exporters_added += 1
                 logger.info("Azure Monitor trace exporter configured")
             except ImportError:
