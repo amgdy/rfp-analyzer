@@ -1,4 +1,4 @@
-"""Tests for services.scoring_agent_v2 module.
+"""Tests for services.scoring_agent module.
 
 These tests exercise the parsing/validation logic without calling Azure APIs.
 """
@@ -6,11 +6,11 @@ These tests exercise the parsing/validation logic without calling Azure APIs.
 import json
 import pytest
 
-from services.scoring_agent_v2 import (
+from services.scoring_agent import (
     ScoringCriterion,
     ExtractedCriteria,
     CriterionScore,
-    ProposalEvaluationV2,
+    ProposalEvaluation,
     CriteriaExtractionAgent,
     ProposalScoringAgent,
 )
@@ -85,11 +85,11 @@ class TestCriterionScore:
         assert cs.weighted_score == 42.5
 
 
-class TestProposalEvaluationV2:
-    """Tests for ProposalEvaluationV2 model."""
+class TestProposalEvaluation:
+    """Tests for ProposalEvaluation model."""
 
     def test_create_valid(self):
-        ev = ProposalEvaluationV2(
+        ev = ProposalEvaluation(
             rfp_title="RFP",
             supplier_name="Vendor",
             supplier_site="NYC",
