@@ -3,7 +3,7 @@
 import json
 import pytest
 
-from services.utils import parse_json_response, format_duration
+from services.utils import parse_json_response, format_duration, clean_extracted_text
 
 
 # ============================================================================
@@ -131,3 +131,71 @@ class TestFormatDuration:
         """Negative durations should still format (edge case)."""
         result = format_duration(-5.0)
         assert result == "-5.0s"
+
+
+# ============================================================================
+# clean_extracted_text tests
+# ============================================================================
+
+class TestCleanExtractedText:
+    """Tests for the clean_extracted_text helper."""
+
+    def test_empty_string(self):
+        assert clean_extracted_text("") == ""
+
+    def test_plain_text_unchanged(self):
+        text = "This is plain text."
+        assert clean_extracted_text(text) == text
+
+    def test_strips_html_tags(self):
+        assert clean_extracted_text("<p>Hello</p>") == "Hello"
+
+    def test_strips_nested_html(self):
+        result = clean_extracted_text("<div><span>Content</span></div>")
+        assert result == "Content"
+
+    def test_strips_html_entities(self):
+        result = clean_extracted_text("A&amp;B &lt; C")
+        assert "&amp;" not in result
+        assert "&lt;" not in result
+        assert "A" in result
+
+    def test_strips_numeric_entities(self):
+        result = clean_extracted_text("Hello&#160;World")
+        assert "&#160;" not in result
+
+    def test_strips_xml_processing_instructions(self):
+        result = clean_extracted_text('<?xml version="1.0"?>Hello')
+        assert "<?xml" not in result
+        assert "Hello" in result
+
+    def test_strips_noisy_image_refs(self):
+        result = clean_extracted_text("Before ![image](http://example.com/img.png) After")
+        assert "![image]" not in result
+        assert "Before" in result
+        assert "After" in result
+
+    def test_strips_base64_data_uris(self):
+        result = clean_extracted_text("Image: data:image/png;base64,iVBOR... end")
+        assert "data:image" not in result
+
+    def test_collapses_excessive_whitespace(self):
+        result = clean_extracted_text("word1    word2\t\tword3")
+        assert "word1 word2 word3" == result
+
+    def test_collapses_excessive_newlines(self):
+        result = clean_extracted_text("para1\n\n\n\n\npara2")
+        assert result == "para1\n\npara2"
+
+    def test_strips_line_whitespace(self):
+        result = clean_extracted_text("  leading   \n   trailing  ")
+        assert result == "leading\ntrailing"
+
+    def test_combined_cleanup(self):
+        messy = "<p>Hello &amp; welcome</p>\n\n\n\n<br/>Goodbye"
+        result = clean_extracted_text(messy)
+        assert "<p>" not in result
+        assert "<br/>" not in result
+        assert "&amp;" not in result
+        assert "Hello" in result
+        assert "Goodbye" in result

@@ -4,8 +4,11 @@ Provides token counting, budget management, and content splitting
 to ensure documents fit within model context windows.
 
 Configured for GPT-5.4 (1.05M token context, 128K max output).
+The context window size can be overridden via the ``MAX_CONTEXT_TOKENS``
+environment variable.
 """
 
+import os
 import re
 from typing import List
 
@@ -18,8 +21,24 @@ logger = get_logger(__name__)
 # Model Configuration - GPT-5.4
 # ============================================================================
 
-# GPT-5.4 context window: 1,050,000 tokens
-MODEL_CONTEXT_WINDOW = 1_050_000
+def _load_context_window() -> int:
+    """Load the model context window size from env or use GPT-5.4 default."""
+    env_val = os.getenv("MAX_CONTEXT_TOKENS")
+    if env_val:
+        try:
+            value = int(env_val)
+            if value > 0:
+                logger.info("Using MAX_CONTEXT_TOKENS from environment: %d", value)
+                return value
+        except ValueError:
+            logger.warning(
+                "Invalid MAX_CONTEXT_TOKENS value '%s', using default", env_val
+            )
+    return 1_050_000
+
+
+# GPT-5.4 context window: 1,050,000 tokens (overridable via MAX_CONTEXT_TOKENS env var)
+MODEL_CONTEXT_WINDOW = _load_context_window()
 
 # Maximum output tokens for GPT-5.4
 MAX_OUTPUT_TOKENS = 128_000
@@ -28,7 +47,7 @@ MAX_OUTPUT_TOKENS = 128_000
 SAFETY_MARGIN = 50_000
 
 # Safe input token budget (context window - output tokens - safety margin)
-SAFE_INPUT_TOKENS = MODEL_CONTEXT_WINDOW - MAX_OUTPUT_TOKENS - SAFETY_MARGIN  # 872,000
+SAFE_INPUT_TOKENS = MODEL_CONTEXT_WINDOW - MAX_OUTPUT_TOKENS - SAFETY_MARGIN
 
 # Characters per token ratio (conservative estimate for English text with formatting)
 # GPT models average ~3.5-4 chars/token; we use 3.5 to be conservative (overestimates tokens)

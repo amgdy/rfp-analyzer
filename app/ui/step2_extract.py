@@ -5,14 +5,38 @@ import asyncio
 import time
 import uuid
 
-from services.utils import format_duration
+from services.utils import format_duration, clean_extracted_text
 from services.document_processor import ExtractionService
 from services.processing_queue import ProcessingQueue, QueueItemStatus
+from services.token_utils import estimate_token_count, MODEL_CONTEXT_WINDOW
 from services.logging_config import get_logger
 from ui.styles import STEP_ANIMATION_CSS
 from ui.components import render_step_indicator
 
 logger = get_logger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Mermaid diagram for chunked processing (shown for large documents)
+# ---------------------------------------------------------------------------
+
+_CHUNKING_MERMAID = """
+```mermaid
+flowchart TD
+    A["📄 Large Document<br/>(>{max_tokens:,} tokens)"] --> B["🔢 Estimate Token Count"]
+    B --> C{{"Exceeds context<br/>window?"}}
+    C -- No --> D["✅ Process in single call"]
+    C -- Yes --> E["✂️ Split by headings /<br/>paragraphs"]
+    E --> F["📦 Chunk 1"]
+    E --> G["📦 Chunk 2"]
+    E --> H["📦 Chunk N"]
+    F --> I["🤖 LLM Evaluation"]
+    G --> I
+    H --> I
+    I --> J["🔀 Merge Results<br/>(best score per criterion)"]
+    J --> K["📊 Final Evaluation"]
+```
+"""
 
 
 def render_step2():
@@ -69,15 +93,8 @@ def render_step2():
                     if item.duration:
                         st.markdown(f"• **{item.name}**: `{format_duration(item.duration)}`")
 
-        # Show extracted content previews
-        with st.expander("📄 RFP Content Preview", expanded=False):
-            st.markdown(st.session_state.rfp_content[:2000] + "..." if len(st.session_state.rfp_content) > 2000 else st.session_state.rfp_content)
-
-        with st.expander("📝 Proposal Contents Preview", expanded=False):
-            for filename, content in st.session_state.proposal_contents.items():
-                st.markdown(f"### {filename}")
-                st.markdown(content[:1000] + "..." if len(content) > 1000 else content)
-                st.markdown("---")
+        # Show extracted content previews (cleaned for executive display)
+        _render_content_previews()
 
         if st.button(
             "Continue to Step 3: Evaluate →",
@@ -106,6 +123,48 @@ def render_step2():
         logger.info("User navigating back to Step 1")
         st.session_state.step = 1
         st.rerun()
+
+
+def _render_content_previews():
+    """Render cleaned previews of extracted document content.
+
+    Shows a mermaid processing diagram when a document's estimated
+    token count exceeds the configured model context window.
+    """
+    rfp_text = st.session_state.rfp_content or ""
+    rfp_tokens = estimate_token_count(rfp_text)
+
+    with st.expander("📄 RFP Content Preview", expanded=False):
+        st.caption(f"Estimated tokens: **{rfp_tokens:,}** / Context window: **{MODEL_CONTEXT_WINDOW:,}**")
+        if rfp_tokens > MODEL_CONTEXT_WINDOW:
+            st.warning(
+                "⚠️ This document exceeds the model context window and will be "
+                "processed using chunked evaluation."
+            )
+            st.markdown(
+                _CHUNKING_MERMAID.replace("{max_tokens:,}", f"{MODEL_CONTEXT_WINDOW:,}")
+            )
+        cleaned = clean_extracted_text(rfp_text)
+        preview = cleaned[:2000] + "…" if len(cleaned) > 2000 else cleaned
+        st.markdown(preview)
+
+    with st.expander("📝 Proposal Contents Preview", expanded=False):
+        for filename, content in st.session_state.proposal_contents.items():
+            tokens = estimate_token_count(content)
+            st.markdown(f"### {filename}")
+            st.caption(f"Estimated tokens: **{tokens:,}** / Context window: **{MODEL_CONTEXT_WINDOW:,}**")
+            if tokens > MODEL_CONTEXT_WINDOW:
+                st.warning(
+                    "⚠️ This document exceeds the model context window and will be "
+                    "processed using chunked evaluation."
+                )
+                st.markdown(
+                    _CHUNKING_MERMAID.replace("{max_tokens:,}", f"{MODEL_CONTEXT_WINDOW:,}")
+                )
+            cleaned = clean_extracted_text(content)
+            preview = cleaned[:1000] + "…" if len(cleaned) > 1000 else cleaned
+            st.markdown(preview)
+            st.markdown("---")
 
 
 def run_extraction_pipeline():

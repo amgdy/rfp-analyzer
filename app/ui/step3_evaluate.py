@@ -309,20 +309,24 @@ def render_comparison_results():
         total_time = st.session_state.step_durations.get("evaluation_total", 0)
         st.info(f"⏱️ Total evaluation time: {format_duration(total_time)}")
 
-    # Vendor Rankings Summary
+    # ------------------------------------------------------------------
+    # Build a single, authoritative ranking from evaluation data so that
+    # the vendor cards, charts, and text all agree.
+    # ------------------------------------------------------------------
+    ranked_evals = sorted(evaluations, key=lambda e: e.get("total_score", 0), reverse=True)
+
     st.subheader("🏆 Vendor Rankings")
 
-    rankings = comparison.get("vendor_rankings", [])
-    if rankings:
-        cols = st.columns(min(len(rankings), 4))
-        for i, ranking in enumerate(rankings[:4]):
+    if ranked_evals:
+        cols = st.columns(min(len(ranked_evals), 4))
+        for i, eval_result in enumerate(ranked_evals[:4]):
             with cols[i]:
-                rank = ranking.get("rank", i+1)
+                rank = i + 1
                 medal = "🥇" if rank == 1 else "🥈" if rank == 2 else "🥉" if rank == 3 else "🏅"
                 st.metric(
                     label=f"{medal} #{rank}",
-                    value=ranking.get("vendor_name", "Unknown")[:20],
-                    delta=f"{ranking.get('total_score', 0):.1f} ({ranking.get('grade', 'N/A')})"
+                    value=eval_result.get("supplier_name", "Unknown")[:20],
+                    delta=f"{eval_result.get('total_score', 0):.1f} ({eval_result.get('grade', 'N/A')})"
                 )
 
     # Selection Recommendation
@@ -355,6 +359,18 @@ def render_comparison_results():
 
     with tab5:
         render_export_options(comparison, evaluations)
+
+
+def _build_criterion_score_map(eval_result: dict) -> dict:
+    """Build a {criterion_id: score_dict} lookup from an evaluation result.
+
+    Using criterion_id as the key guarantees that charts and text refer to
+    the same criterion regardless of ordering differences between vendors.
+    """
+    return {
+        cs.get("criterion_id", f"C-{i}"): cs
+        for i, cs in enumerate(eval_result.get("criterion_scores", []))
+    }
 
 
 def render_metrics_dashboard(comparison: dict, evaluations: list):
@@ -402,11 +418,12 @@ def render_metrics_dashboard(comparison: dict, evaluations: list):
                 break
 
             criterion = criteria[criterion_idx]
+            criterion_id = criterion.get("criterion_id", f"C-{criterion_idx + 1}")
             criterion_name = criterion.get("criterion_name", f"Criterion {criterion_idx + 1}")
             criterion_weight = criterion.get("weight", 0)
 
             with cols[j]:
-                _render_criterion_bar_chart(evaluations, criterion_idx, criterion_name, criterion_weight)
+                _render_criterion_bar_chart(evaluations, criterion_id, criterion_name, criterion_weight)
 
     # Vendor recommendation section
     st.markdown("---")
@@ -461,19 +478,19 @@ def _render_overall_comparison_bar(evaluations: list):
     st.plotly_chart(fig, use_container_width=True)
 
 
-def _render_criterion_bar_chart(evaluations: list, criterion_idx: int, criterion_name: str, weight: float):
-    """Render a bar chart for a specific criterion showing vendor scores."""
+def _render_criterion_bar_chart(evaluations: list, criterion_id: str, criterion_name: str, weight: float):
+    """Render a bar chart for a specific criterion showing vendor scores.
+
+    Looks up scores by ``criterion_id`` so results match text exactly.
+    """
     vendor_names = []
     scores = []
 
     for eval_result in evaluations:
         vendor_name = eval_result.get("supplier_name", "Unknown")
-        criterion_scores = eval_result.get("criterion_scores", [])
-
-        if criterion_idx < len(criterion_scores):
-            score = criterion_scores[criterion_idx].get("raw_score", 0)
-        else:
-            score = 0
+        score_map = _build_criterion_score_map(eval_result)
+        cs = score_map.get(criterion_id, {})
+        score = cs.get("raw_score", 0)
 
         vendor_names.append(vendor_name)
         scores.append(score)
@@ -513,7 +530,7 @@ def _render_criterion_bar_chart(evaluations: list, criterion_idx: int, criterion
         xaxis_tickangle=-45 if len(vendor_names) > 3 else 0
     )
 
-    st.plotly_chart(fig, use_container_width=True, key=f"bar_{criterion_idx}")
+    st.plotly_chart(fig, use_container_width=True, key=f"bar_{criterion_id}")
 
 
 def _render_criterion_recommendations(comparison: dict, evaluations: list):
@@ -526,24 +543,24 @@ def _render_criterion_recommendations(comparison: dict, evaluations: list):
             return
 
         criteria = evaluations[0]["criterion_scores"]
-        for criterion_idx, criterion in enumerate(criteria):
-            criterion_name = criterion.get("criterion_name", f"Criterion {criterion_idx + 1}")
+        for criterion in criteria:
+            criterion_id = criterion.get("criterion_id", "")
+            criterion_name = criterion.get("criterion_name", criterion_id)
 
-            # Find best vendor for this criterion
+            # Find best vendor for this criterion using criterion_id lookup
             best_vendor = None
             best_score = -1
             all_scores = []
 
             for eval_result in evaluations:
                 vendor_name = eval_result.get("supplier_name", "Unknown")
-                criterion_scores = eval_result.get("criterion_scores", [])
-
-                if criterion_idx < len(criterion_scores):
-                    score = criterion_scores[criterion_idx].get("raw_score", 0)
-                    all_scores.append((vendor_name, score))
-                    if score > best_score:
-                        best_score = score
-                        best_vendor = vendor_name
+                score_map = _build_criterion_score_map(eval_result)
+                cs = score_map.get(criterion_id, {})
+                score = cs.get("raw_score", 0)
+                all_scores.append((vendor_name, score))
+                if score > best_score:
+                    best_score = score
+                    best_vendor = vendor_name
 
             if best_vendor:
                 with st.expander(f"**{criterion_name}** - Recommended: {best_vendor}"):
@@ -581,14 +598,13 @@ def _render_basic_metrics_dashboard(comparison: dict, evaluations: list):
     """Render a basic metrics dashboard without plotly charts."""
     st.markdown("### Vendor Performance Summary")
 
-    # Overall comparison table
+    # Overall comparison table — sorted by score (single source of truth)
     st.markdown("#### Total Scores")
     for eval_result in sorted(evaluations, key=lambda x: x.get("total_score", 0), reverse=True):
         vendor_name = eval_result.get("supplier_name", "Unknown")
         total_score = eval_result.get("total_score", 0)
         grade = eval_result.get("grade", "N/A")
 
-        # Progress bar visualization
         st.markdown(f"**{vendor_name}**: {total_score:.1f}/100 ({grade})")
         st.progress(min(total_score / 100, 1.0))
 
@@ -598,23 +614,23 @@ def _render_basic_metrics_dashboard(comparison: dict, evaluations: list):
     if evaluations and evaluations[0].get("criterion_scores"):
         criteria = evaluations[0]["criterion_scores"]
 
-        for criterion_idx, criterion in enumerate(criteria):
-            criterion_name = criterion.get("criterion_name", f"Criterion {criterion_idx + 1}")
+        for criterion in criteria:
+            criterion_id = criterion.get("criterion_id", "")
+            criterion_name = criterion.get("criterion_name", criterion_id)
             criterion_weight = criterion.get("weight", 0)
 
             st.markdown(f"**{criterion_name}** (Weight: {criterion_weight:.1f}%)")
 
             for eval_result in evaluations:
                 vendor_name = eval_result.get("supplier_name", "Unknown")
-                criterion_scores = eval_result.get("criterion_scores", [])
-
-                if criterion_idx < len(criterion_scores):
-                    score = criterion_scores[criterion_idx].get("raw_score", 0)
-                    col1, col2 = st.columns([3, 1])
-                    with col1:
-                        st.progress(min(score / 100, 1.0))
-                    with col2:
-                        st.write(f"{vendor_name[:15]}: {score:.1f}")
+                score_map = _build_criterion_score_map(eval_result)
+                cs = score_map.get(criterion_id, {})
+                score = cs.get("raw_score", 0)
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    st.progress(min(score / 100, 1.0))
+                with col2:
+                    st.write(f"{vendor_name[:15]}: {score:.1f}")
 
 
 def render_comparison_overview(comparison: dict, evaluations: list):
@@ -733,23 +749,23 @@ def render_detailed_scores(evaluations: list):
         st.warning("No evaluations available.")
         return
 
-    # Build comparison data
-    criteria = []
-    if evaluations[0].get("criterion_scores"):
-        criteria = [cs.get("criterion_name", cs.get("criterion_id", f"C-{i}"))
-                   for i, cs in enumerate(evaluations[0]["criterion_scores"])]
+    # Build the set of criteria from the first evaluation (the canonical list)
+    first_criteria = evaluations[0].get("criterion_scores", [])
+    if not first_criteria:
+        st.warning("No criteria scores available.")
+        return
 
-    # Create comparison table data
+    # Create comparison table data — lookup by criterion_id
     table_data = []
-    for criterion_idx, criterion_name in enumerate(criteria):
+    for criterion in first_criteria:
+        cid = criterion.get("criterion_id", "")
+        criterion_name = criterion.get("criterion_name", cid)
         row = {"Criterion": criterion_name}
         for eval_result in evaluations:
             vendor_name = eval_result.get("supplier_name", "Unknown")[:15]
-            scores = eval_result.get("criterion_scores", [])
-            if criterion_idx < len(scores):
-                row[vendor_name] = f"{scores[criterion_idx].get('raw_score', 0):.1f}"
-            else:
-                row[vendor_name] = "N/A"
+            score_map = _build_criterion_score_map(eval_result)
+            cs = score_map.get(cid, {})
+            row[vendor_name] = f"{cs.get('raw_score', 0):.1f}"
         table_data.append(row)
 
     # Add total row

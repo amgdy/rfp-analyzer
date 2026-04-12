@@ -12,6 +12,7 @@ from services.token_utils import (
     SAFE_INPUT_TOKENS,
     SAFETY_MARGIN,
     CHARS_PER_TOKEN,
+    _load_context_window,
     estimate_token_count,
     calculate_token_budget,
     fits_in_context,
@@ -34,7 +35,8 @@ class TestConstants:
     def test_safe_input_equals_formula(self):
         assert SAFE_INPUT_TOKENS == MODEL_CONTEXT_WINDOW - MAX_OUTPUT_TOKENS - SAFETY_MARGIN
 
-    def test_context_window_is_1m(self):
+    def test_default_context_window_is_1m(self):
+        # Without env override the default should be 1,050,000
         assert MODEL_CONTEXT_WINDOW == 1_050_000
 
     def test_max_output_tokens(self):
@@ -366,3 +368,32 @@ class TestGetOverlapText:
 
     def test_negative_overlap(self):
         assert _get_overlap_text("text", -1) == ""
+
+
+# ============================================================================
+# _load_context_window tests (env-based configuration)
+# ============================================================================
+
+
+class TestLoadContextWindow:
+    """Tests for the env-var based context window loader."""
+
+    def test_default_when_no_env(self, monkeypatch):
+        monkeypatch.delenv("MAX_CONTEXT_TOKENS", raising=False)
+        assert _load_context_window() == 1_050_000
+
+    def test_custom_value_from_env(self, monkeypatch):
+        monkeypatch.setenv("MAX_CONTEXT_TOKENS", "500000")
+        assert _load_context_window() == 500_000
+
+    def test_invalid_env_falls_back(self, monkeypatch):
+        monkeypatch.setenv("MAX_CONTEXT_TOKENS", "not_a_number")
+        assert _load_context_window() == 1_050_000
+
+    def test_zero_value_falls_back(self, monkeypatch):
+        monkeypatch.setenv("MAX_CONTEXT_TOKENS", "0")
+        assert _load_context_window() == 1_050_000
+
+    def test_negative_value_falls_back(self, monkeypatch):
+        monkeypatch.setenv("MAX_CONTEXT_TOKENS", "-100")
+        assert _load_context_window() == 1_050_000
