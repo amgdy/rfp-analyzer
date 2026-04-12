@@ -191,6 +191,7 @@ def run_evaluation_pipeline():
                     extracted_criteria,
                     proposal_content,
                     reasoning_effort=reasoning_effort,
+                    proposal_filename=proposal_name,
                 )
                 tasks.append(task)
             return await asyncio.gather(*tasks, return_exceptions=True)

@@ -3,6 +3,7 @@
 These async functions are used by both main.py and the UI step modules.
 """
 
+import os
 import time
 from .document_processor import DocumentProcessor, ExtractionService
 from .scoring_agent import (
@@ -113,6 +114,7 @@ async def score_proposal(
     proposal_content: str,
     reasoning_effort: str = "high",
     progress_callback: callable = None,
+    proposal_filename: str = "",
 ) -> tuple[dict, float]:
     """Score a vendor proposal against pre-extracted criteria.
 
@@ -121,6 +123,7 @@ async def score_proposal(
         proposal_content: The vendor proposal content
         reasoning_effort: Reasoning effort level ("low", "medium", "high")
         progress_callback: Optional callback for progress updates
+        proposal_filename: Original filename of the proposal (used as fallback vendor name)
 
     Returns:
         Tuple of (results, duration_seconds)
@@ -178,6 +181,13 @@ async def score_proposal(
             "reasoning_effort": reasoning_effort,
         },
     }
+
+    # Fall back to filename-derived vendor name when the LLM couldn't extract one
+    _UNKNOWN_NAMES = {"Unknown Vendor", "Unknown", "N/A", ""}
+    if results.get("supplier_name", "") in _UNKNOWN_NAMES and proposal_filename:
+        fallback_name = os.path.splitext(proposal_filename)[0]
+        logger.info("Vendor name unknown — using filename as fallback: %s", fallback_name)
+        results["supplier_name"] = fallback_name
 
     duration = time.time() - start_time
     logger.info("Proposal scoring completed in %.2fs - Score: %.2f",
