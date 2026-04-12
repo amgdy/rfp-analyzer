@@ -20,7 +20,9 @@ Usage:
 """
 
 import os
+import re
 import logging
+from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -181,9 +183,6 @@ def get_tracer(name: str = __name__):
 def _get_app_version() -> str:
     """Read version from pyproject.toml."""
     try:
-        from pathlib import Path
-        import re
-
         pyproject = Path(__file__).parent.parent / "pyproject.toml"
         if pyproject.exists():
             content = pyproject.read_text(encoding="utf-8")

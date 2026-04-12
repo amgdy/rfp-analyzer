@@ -205,9 +205,9 @@ def render_sidebar():
         st.caption("Powered by Azure AI Services, Microsoft Foundry & Agent Framework")
         # Show app version
         try:
-            from main import APP_VERSION
-            st.caption(f"v{APP_VERSION}")
-        except ImportError:
+            from services.telemetry import _get_app_version
+            st.caption(f"v{_get_app_version()}")
+        except Exception:
             pass
 
 
