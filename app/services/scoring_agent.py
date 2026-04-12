@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Annotated
 
 from openai import AzureOpenAI
-from agent_framework.azure import AzureOpenAIChatClient, AzureOpenAIResponsesClient
+from agent_framework.openai import OpenAIChatClient, OpenAIChatCompletionClient
 from azure.identity import DefaultAzureCredential
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
@@ -110,11 +110,11 @@ class ScoringAgent:
         deployment_name = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME")
         
         # Create the Azure OpenAI client for reasoning models (o1/o3)
-        self.client = AzureOpenAIResponsesClient(
+        self.client = OpenAIChatClient(
             credential=DefaultAzureCredential(),
-            endpoint=endpoint,
-            deployment_name=deployment_name,
-            api_version="v1"
+            azure_endpoint=endpoint,
+            model=deployment_name,
+            api_version="v1",
         )
         
         # Deployment name for the reasoning model (o3 or o1)

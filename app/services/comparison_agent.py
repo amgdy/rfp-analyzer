@@ -13,7 +13,7 @@ import io
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Callable
 
-from agent_framework.azure import AzureOpenAIResponsesClient
+from agent_framework.openai import OpenAIChatClient
 from agent_framework import Agent
 from azure.identity import DefaultAzureCredential
 from pydantic import BaseModel, Field
@@ -176,10 +176,10 @@ Respond with a valid JSON object:
         endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
         deployment_name = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME")
 
-        self.client = AzureOpenAIResponsesClient(
+        self.client = OpenAIChatClient(
             credential=DefaultAzureCredential(),
-            endpoint=endpoint,
-            deployment_name=deployment_name,
+            azure_endpoint=endpoint,
+            model=deployment_name,
             api_version="v1",
         )
 

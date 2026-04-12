@@ -22,6 +22,7 @@ _MODULES_TO_STUB = [
     # agent framework
     "agent_framework",
     "agent_framework.azure",
+    "agent_framework.openai",
     # azure identity / core
     "azure",
     "azure.identity",
@@ -61,9 +62,20 @@ for _name in _MODULES_TO_STUB:
 
 # --- Fake classes required by the source modules ---
 
+# agent_framework (top-level)
+sys.modules["agent_framework"].Agent = type("Agent", (), {})
+
 # agent_framework.azure
 sys.modules["agent_framework.azure"].AzureOpenAIResponsesClient = type(
     "AzureOpenAIResponsesClient", (), {}
+)
+
+# agent_framework.openai
+sys.modules["agent_framework.openai"].OpenAIChatClient = type(
+    "OpenAIChatClient", (), {}
+)
+sys.modules["agent_framework.openai"].OpenAIChatCompletionClient = type(
+    "OpenAIChatCompletionClient", (), {}
 )
 
 # azure.identity
