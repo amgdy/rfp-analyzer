@@ -823,8 +823,8 @@ def render_detailed_scores(evaluations: list):
             score_map = _build_criterion_score_map(eval_result)
             cs = score_map.get(cid, {})
             raw = cs.get("raw_score", 0) or 0
-            w = cs.get("weight", 0) or 0
-            weighted = round((raw * w) / 100, 2)
+            criterion_weight = cs.get("weight", 0) or 0
+            weighted = round((raw * criterion_weight) / 100, 2)
             row[vendor_name] = f"{raw:.1f} ({weighted:.1f})"
         table_data.append(row)
 
@@ -836,8 +836,8 @@ def render_detailed_scores(evaluations: list):
         computed_total = 0.0
         for cs in eval_result.get("criterion_scores", []):
             raw = cs.get("raw_score", 0) or 0
-            w = cs.get("weight", 0) or 0
-            computed_total += (raw * w) / 100
+            criterion_weight = cs.get("weight", 0) or 0
+            computed_total += (raw * criterion_weight) / 100
         computed_total = round(computed_total, 1)
         total_row[vendor_name] = f"**{computed_total}**"
     table_data.append(total_row)
