@@ -87,7 +87,7 @@ var foundryProjectName = 'proj-rfpa-${resourceToken}'
 var foundryAccountName = '${abbrs.aiFoundryAccounts}-rfpa-${resourceToken}'
 
 // Microsoft Foundry Resource
-module foundryAccount 'br/public:avm/res/cognitive-services/account:0.14.1' = {
+module foundryAccount 'br/public:avm/res/cognitive-services/account:0.14.2' = {
   name: 'foundry-project'
   params:{
     name: foundryAccountName
@@ -165,7 +165,7 @@ module rfpAnalyzerIdentity 'br/public:avm/res/managed-identity/user-assigned-ide
 }
 
 // Container registry
-module containerRegistry 'br/public:avm/res/container-registry/registry:0.10.0' = {
+module containerRegistry 'br/public:avm/res/container-registry/registry:0.12.1' = {
   name: 'registry'
   params: {
     name: '${abbrs.containerRegistryRegistries}${resourceToken}'
@@ -187,7 +187,7 @@ module containerRegistry 'br/public:avm/res/container-registry/registry:0.10.0' 
 }
 
 // Container apps environment
-module containerAppsEnvironment 'br/public:avm/res/app/managed-environment:0.10.2' = {
+module containerAppsEnvironment 'br/public:avm/res/app/managed-environment:0.13.1' = {
   name: 'container-apps-environment'
   params: {
     logAnalyticsWorkspaceResourceId: monitoring.outputs.logAnalyticsWorkspaceResourceId
@@ -208,7 +208,7 @@ module rfpAnalyzerFetchLatestImage './modules/fetch-container-image.bicep' = {
   }
 }
 
-module rfpAnalyzer 'br/public:avm/res/app/container-app:0.20.0' = {
+module rfpAnalyzer 'br/public:avm/res/app/container-app:0.22.0' = {
   name: 'rfpAnalyzer'
   params: {
     name: 'rfp-analyzer'
