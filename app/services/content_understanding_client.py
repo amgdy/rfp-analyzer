@@ -101,6 +101,16 @@ class AzureContentUnderstandingClient:
         self._session = requests.Session()
         self._session.headers.update(self._headers)
 
+    def close(self):
+        """Close the underlying HTTP session to release connections."""
+        self._session.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()
+
     def _get_analyzer_url(
         self, endpoint: str, api_version: str, analyzer_id: str
     ) -> str:
