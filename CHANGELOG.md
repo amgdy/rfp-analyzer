@@ -18,6 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated README.md with complete project information
 - Improved deployment documentation
 
+### Fixed
+- **Aspire Dashboard task**: Fixed `start-aspire-dashboard` VS Code task that failed on repeated launches due to container name conflict. The task now stops/removes any existing container before starting a new one.
+- Removed incorrect `isBackground: true` from Aspire task (docker run -d returns immediately, so it's not a background task)
+- Added OTLP/HTTP port mapping (4318→18890) for Aspire Dashboard (in addition to existing gRPC 4317→18889)
+- Stop task now handles "not running" state gracefully
+
 ## [0.2.0] - 2026-04-12
 
 ### Added
