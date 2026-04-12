@@ -251,7 +251,7 @@ Respond with ONLY valid JSON matching the schema in your instructions."""
                 client=self.client,
                 instructions=self.SYSTEM_INSTRUCTIONS,
                 name="Comparison Agent",
-                additional_chat_options={
+                default_options={
                     "reasoning": {"effort": reasoning_effort, "summary": "detailed"}
                 },
             )

@@ -72,10 +72,10 @@ sys.modules["agent_framework.azure"].AzureOpenAIResponsesClient = type(
 
 # agent_framework.openai
 sys.modules["agent_framework.openai"].OpenAIChatClient = type(
-    "OpenAIChatClient", (), {}
+    "OpenAIChatClient", (), {"__class_getitem__": classmethod(lambda cls, item: cls)}
 )
-sys.modules["agent_framework.openai"].OpenAIChatCompletionClient = type(
-    "OpenAIChatCompletionClient", (), {}
+sys.modules["agent_framework.openai"].OpenAIChatOptions = type(
+    "OpenAIChatOptions", (), {}
 )
 
 # azure.identity

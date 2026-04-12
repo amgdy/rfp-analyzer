@@ -11,6 +11,7 @@ import time
 from datetime import datetime
 from typing import Annotated
 
+from agent_framework import Agent
 from agent_framework.openai import OpenAIChatClient
 from azure.identity import DefaultAzureCredential
 from pydantic import BaseModel, Field
@@ -192,11 +193,11 @@ class ScoringAgent:
         # Call the reasoning model with specified reasoning effort
         api_start = time.time()
         try:
-            agent = self.client.create_agent(
+            agent = Agent(
+                client=self.client,
                 instructions=system_instructions,
                 name="RFP Scoring Agent",
-
-                additional_chat_options={"reasoning": {"effort": reasoning_effort, "summary": "detailed"}}
+                default_options={"reasoning": {"effort": reasoning_effort, "summary": "detailed"}},
             )
             agent_result = await agent.run(user_prompt)
 

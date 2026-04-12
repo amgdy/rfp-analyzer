@@ -261,7 +261,7 @@ Respond with ONLY valid JSON matching the schema in your instructions."""
                 client=self.client,
                 instructions=self.SYSTEM_INSTRUCTIONS,
                 name="Criteria Extraction Agent",
-                additional_chat_options={
+                default_options={
                     "reasoning": {"effort": reasoning_effort, "summary": "detailed"}
                 },
             )
@@ -526,7 +526,7 @@ Respond with ONLY valid JSON matching the schema in your instructions."""
                 client=self.client,
                 instructions=system_instructions,
                 name="Proposal Scoring Agent",
-                additional_chat_options={
+                default_options={
                     "reasoning": {"effort": reasoning_effort, "summary": "detailed"}
                 },
             )
