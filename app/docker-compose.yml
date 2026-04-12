@@ -42,11 +42,12 @@ services:
       - APPLICATIONINSIGHTS_CONNECTION_STRING=${APPLICATIONINSIGHTS_CONNECTION_STRING:-}
       - OTEL_SERVICE_NAME=rfp-analyzer
     
-    # Resource limits (sized for large document processing)
+    # Resource limits (sized for large document processing, matches Azure Consumption plan max)
     deploy:
       resources:
         limits:
           memory: 4G
+          cpus: '2.0'
         reservations:
           memory: 1G
     

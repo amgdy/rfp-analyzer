@@ -228,8 +228,8 @@ module rfpAnalyzer 'br/public:avm/res/app/container-app:0.22.0' = {
         image: rfpAnalyzerFetchLatestImage.outputs.?containers[?0].?image ?? 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
         name: 'main'
         resources: {
-          cpu: json('4')
-          memory: '8.0Gi'
+          cpu: json('2')
+          memory: '4.0Gi'
         }
         env: [
           {
