@@ -23,7 +23,7 @@ logger = get_logger(__name__)
 _CHUNKING_MERMAID = """
 ```mermaid
 flowchart TD
-    A["📄 Large Document<br/>(>{max_tokens:,} tokens)"] --> B["🔢 Estimate Token Count"]
+    A["📄 Large Document<br/>(>MAX_TOKENS tokens)"] --> B["🔢 Estimate Token Count"]
     B --> C{{"Exceeds context<br/>window?"}}
     C -- No --> D["✅ Process in single call"]
     C -- Yes --> E["✂️ Split by headings /<br/>paragraphs"]
@@ -142,7 +142,7 @@ def _render_content_previews():
                 "processed using chunked evaluation."
             )
             st.markdown(
-                _CHUNKING_MERMAID.replace("{max_tokens:,}", f"{MODEL_CONTEXT_WINDOW:,}")
+                _CHUNKING_MERMAID.replace("MAX_TOKENS", f"{MODEL_CONTEXT_WINDOW:,}")
             )
         cleaned = clean_extracted_text(rfp_text)
         preview = cleaned[:2000] + "…" if len(cleaned) > 2000 else cleaned
@@ -159,7 +159,7 @@ def _render_content_previews():
                     "processed using chunked evaluation."
                 )
                 st.markdown(
-                    _CHUNKING_MERMAID.replace("{max_tokens:,}", f"{MODEL_CONTEXT_WINDOW:,}")
+                    _CHUNKING_MERMAID.replace("MAX_TOKENS", f"{MODEL_CONTEXT_WINDOW:,}")
                 )
             cleaned = clean_extracted_text(content)
             preview = cleaned[:1000] + "…" if len(cleaned) > 1000 else cleaned
