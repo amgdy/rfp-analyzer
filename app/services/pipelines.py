@@ -150,6 +150,8 @@ async def score_proposal(
         "supplier_site": evaluation.supplier_site,
         "response_id": evaluation.response_id,
         "evaluation_date": evaluation.evaluation_date,
+        "is_qualified_proposal": evaluation.is_qualified_proposal,
+        "disqualification_reason": evaluation.disqualification_reason,
         "total_score": evaluation.total_score,
         "score_percentage": evaluation.score_percentage,
         "grade": evaluation.grade,

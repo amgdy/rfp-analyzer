@@ -173,6 +173,7 @@ def render_sidebar():
                 st.session_state.rfp_content = None
                 st.session_state.proposal_contents = {}
                 st.session_state.evaluation_results = []
+                st.session_state.disqualified_results = []
                 st.session_state.comparison_results = None
                 st.session_state.extracted_criteria = None
                 st.session_state.global_criteria = ""

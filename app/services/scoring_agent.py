@@ -100,6 +100,16 @@ class ProposalEvaluation(BaseModel):
     response_id: str = Field(description="Response/proposal ID")
     evaluation_date: str = Field(description="Date of evaluation")
 
+    # Proposal qualification
+    is_qualified_proposal: bool = Field(
+        default=True,
+        description="Whether the document is a genuine vendor proposal for this RFP",
+    )
+    disqualification_reason: str = Field(
+        default="",
+        description="Reason the document is not a qualified proposal (empty if qualified)",
+    )
+
     # Scoring Summary
     total_score: float = Field(description="Total weighted score (0-100)")
     score_percentage: float = Field(description="Score as percentage")
@@ -582,6 +592,8 @@ You MUST respond with a valid JSON object:
   "supplier_site": "Vendor location",
   "response_id": "Generate ID like RESP-2025-XXXX",
   "evaluation_date": "YYYY-MM-DD",
+  "is_qualified_proposal": true,
+  "disqualification_reason": "",
   "total_score": <sum of all weighted scores>,
   "score_percentage": <total_score as percentage>,
   "grade": "A/B/C/D/F",
@@ -608,6 +620,11 @@ You MUST respond with a valid JSON object:
 ```
 
 ## IMPORTANT:
+- **FIRST**, determine if the document is a genuine vendor proposal responding to the RFP.
+  If the document is NOT a proposal (e.g. a generic brochure, an unrelated document, an internal memo,
+  a template, or any document that does not specifically respond to the RFP), set
+  `"is_qualified_proposal": false` and provide a reason in `"disqualification_reason"`.
+  Still fill in the remaining fields with best-effort values (scores may be 0).
 - Score EVERY criterion from the provided list
 - Provide specific evidence from the proposal
 - Be objective and fair
@@ -958,12 +975,22 @@ Respond with ONLY valid JSON matching the schema in your instructions."""
             all_weaknesses.extend(eval_data.get("overall_weaknesses", []))
             all_recommendations.extend(eval_data.get("recommendations", []))
 
+        # Merge proposal qualification: if ANY chunk says it's not qualified, mark as unqualified
+        is_qualified = all(e.get("is_qualified_proposal", True) for e in chunk_evaluations)
+        disqualification_reasons = [
+            e.get("disqualification_reason", "")
+            for e in chunk_evaluations
+            if not e.get("is_qualified_proposal", True) and e.get("disqualification_reason")
+        ]
+
         return {
             "rfp_title": base.get("rfp_title", criteria.rfp_title),
             "supplier_name": base.get("supplier_name", "Unknown Vendor"),
             "supplier_site": base.get("supplier_site", "Unknown"),
             "response_id": base.get("response_id", "RESP-CHUNKED"),
             "evaluation_date": base.get("evaluation_date", ""),
+            "is_qualified_proposal": is_qualified,
+            "disqualification_reason": "; ".join(disqualification_reasons),
             "total_score": total_score,
             "score_percentage": total_score,
             "grade": grade,
@@ -984,6 +1011,10 @@ Respond with ONLY valid JSON matching the schema in your instructions."""
             # Ensure evaluation_date is set
             if not data.get("evaluation_date"):
                 data["evaluation_date"] = datetime.now().strftime("%Y-%m-%d")
+
+            # Ensure proposal qualification fields are present
+            data.setdefault("is_qualified_proposal", True)
+            data.setdefault("disqualification_reason", "")
 
             # Recalculate total score for accuracy
             criterion_scores = data.get("criterion_scores", [])
@@ -1014,6 +1045,8 @@ Respond with ONLY valid JSON matching the schema in your instructions."""
                 "supplier_site": "Unknown",
                 "response_id": "RESP-ERROR",
                 "evaluation_date": datetime.now().strftime("%Y-%m-%d"),
+                "is_qualified_proposal": True,
+                "disqualification_reason": "",
                 "total_score": 0,
                 "score_percentage": 0,
                 "grade": "F",
@@ -1124,6 +1157,9 @@ class ScoringAgent:
             "supplier_site": evaluation.supplier_site,
             "response_id": evaluation.response_id,
             "evaluation_date": evaluation.evaluation_date,
+            # Proposal qualification
+            "is_qualified_proposal": evaluation.is_qualified_proposal,
+            "disqualification_reason": evaluation.disqualification_reason,
             # Scoring
             "total_score": evaluation.total_score,
             "score_percentage": evaluation.score_percentage,

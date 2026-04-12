@@ -62,6 +62,8 @@ if "proposal_contents" not in st.session_state:
     st.session_state.proposal_contents = {}
 if "evaluation_results" not in st.session_state:
     st.session_state.evaluation_results = []
+if "disqualified_results" not in st.session_state:
+    st.session_state.disqualified_results = []
 if "comparison_results" not in st.session_state:
     st.session_state.comparison_results = None
 if "extracted_criteria" not in st.session_state:

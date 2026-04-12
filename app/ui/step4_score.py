@@ -60,7 +60,9 @@ def render_step4():
         """)
 
     # Check if evaluation has been completed
-    if st.session_state.evaluation_results and st.session_state.comparison_results:
+    has_results = st.session_state.evaluation_results and st.session_state.comparison_results
+    has_disqualified = getattr(st.session_state, "disqualified_results", None)
+    if has_results or has_disqualified:
         render_comparison_results()
     else:
         # Start evaluation
@@ -82,6 +84,7 @@ def render_step4():
         logger.info("User navigating back to Step 3")
         st.session_state.step = 3
         st.session_state.evaluation_results = []
+        st.session_state.disqualified_results = []
         st.session_state.comparison_results = None
         st.rerun()
 
@@ -222,10 +225,28 @@ def run_evaluation_pipeline():
         if failed_items:
             raise Exception(f"Failed to evaluate {len(failed_items)} proposal(s)")
 
-        st.session_state.evaluation_results = evaluation_results
+        # Separate qualified proposals from disqualified documents
+        qualified_results = [
+            r for r in evaluation_results
+            if r.get("is_qualified_proposal", True)
+        ]
+        disqualified_results = [
+            r for r in evaluation_results
+            if not r.get("is_qualified_proposal", True)
+        ]
 
-        # Compare results if multiple proposals
-        if len(evaluation_results) > 1:
+        if disqualified_results:
+            logger.info(
+                "%d document(s) disqualified as non-proposals: %s",
+                len(disqualified_results),
+                [r.get("_proposal_file", "?") for r in disqualified_results],
+            )
+
+        st.session_state.evaluation_results = qualified_results
+        st.session_state.disqualified_results = disqualified_results
+
+        # Compare results if multiple qualified proposals
+        if len(qualified_results) > 1:
             comparison_item = scoring_queue.get_item("comparison")
             comparison_item.start()
 
@@ -237,7 +258,7 @@ def run_evaluation_pipeline():
 
                 comparison_results = asyncio.run(
                     comparison_agent.compare_evaluations(
-                        evaluation_results,
+                        qualified_results,
                         rfp_title,
                         reasoning_effort=reasoning_effort
                     )
@@ -252,20 +273,29 @@ def run_evaluation_pipeline():
                 raise
         else:
             # Single proposal - create basic comparison structure
-            if evaluation_results:
+            if qualified_results:
                 st.session_state.comparison_results = {
-                    "rfp_title": evaluation_results[0].get("rfp_title", "RFP Evaluation"),
-                    "total_vendors": len(evaluation_results),
+                    "rfp_title": qualified_results[0].get("rfp_title", "RFP Evaluation"),
+                    "total_vendors": len(qualified_results),
                     "vendor_rankings": [{
                         "rank": 1,
-                        "vendor_name": evaluation_results[0].get("supplier_name", "Unknown"),
-                        "total_score": evaluation_results[0].get("total_score", 0),
-                        "grade": evaluation_results[0].get("grade", "N/A"),
-                        "key_strengths": evaluation_results[0].get("overall_strengths", [])[:3],
-                        "key_concerns": evaluation_results[0].get("overall_weaknesses", [])[:3],
-                        "recommendation": evaluation_results[0].get("recommendation", "")
+                        "vendor_name": qualified_results[0].get("supplier_name", "Unknown"),
+                        "total_score": qualified_results[0].get("total_score", 0),
+                        "grade": qualified_results[0].get("grade", "N/A"),
+                        "key_strengths": qualified_results[0].get("overall_strengths", [])[:3],
+                        "key_concerns": qualified_results[0].get("overall_weaknesses", [])[:3],
+                        "recommendation": qualified_results[0].get("recommendation", "")
                     }],
-                    "selection_recommendation": evaluation_results[0].get("recommendation", ""),
+                    "selection_recommendation": qualified_results[0].get("recommendation", ""),
+                    "comparison_insights": []
+                }
+            elif disqualified_results:
+                # All proposals were disqualified
+                st.session_state.comparison_results = {
+                    "rfp_title": disqualified_results[0].get("rfp_title", "RFP Evaluation"),
+                    "total_vendors": 0,
+                    "vendor_rankings": [],
+                    "selection_recommendation": "No qualified proposals to compare.",
                     "comparison_insights": []
                 }
 
@@ -305,11 +335,34 @@ def render_comparison_results():
 
     comparison = st.session_state.comparison_results
     evaluations = st.session_state.evaluation_results
+    disqualified = getattr(st.session_state, "disqualified_results", None) or []
 
     # Display timing if available
     if st.session_state.step_durations:
         total_time = st.session_state.step_durations.get("evaluation_total", 0)
         st.info(f"⏱️ Total evaluation time: {format_duration(total_time)}")
+
+    # Show disqualified documents if any
+    if disqualified:
+        st.subheader("⚠️ Disqualified Documents")
+        st.warning(
+            f"{len(disqualified)} document(s) were excluded from scoring because they are "
+            "not qualified vendor proposals for this RFP."
+        )
+        for dq in disqualified:
+            filename = dq.get("_proposal_file", "Unknown file")
+            vendor = dq.get("supplier_name", "Unknown")
+            reason = dq.get("disqualification_reason", "Not a vendor proposal")
+            with st.expander(f"🚫 {filename} ({vendor})"):
+                st.markdown(f"**Reason:** {reason}")
+                summary = dq.get("executive_summary", "")
+                if summary:
+                    st.markdown(f"**Summary:** {summary}")
+        st.markdown("---")
+
+    if not evaluations:
+        st.warning("No qualified vendor proposals to compare.")
+        return
 
     # ------------------------------------------------------------------
     # Build a single, authoritative ranking from evaluation data so that
