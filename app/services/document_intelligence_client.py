@@ -297,9 +297,11 @@ class AzureDocumentIntelligenceClient:
                     getattr(r, "page_number", None) for r in regions
                 } - {None})
                 if pages:
-                    parts.append(
-                        f"\n**Location:** Page {'–'.join(str(p) for p in [pages[0], pages[-1]] if p)}"
-                    )
+                    if len(pages) == 1:
+                        page_label = f"Page {pages[0]}"
+                    else:
+                        page_label = f"Pages {pages[0]}–{pages[-1]}"
+                    parts.append(f"\n**Location:** {page_label}")
 
             # Caption
             caption = getattr(table, "caption", None)
@@ -428,7 +430,7 @@ class AzureDocumentIntelligenceClient:
             if not caption and not elements_content:
                 figure_md_parts.append(
                     "\n*This figure does not have a machine-readable caption or "
-                    "textual content.  Refer to the surrounding document context "
+                    "textual content. Refer to the surrounding document context "
                     "for its meaning.*"
                 )
 
