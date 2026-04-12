@@ -1,0 +1,39 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "start-aspire-dashboard",
+            "type": "shell",
+            "command": "docker",
+            "args": [
+                "run",
+                "--rm",
+                "-d",
+                "--name", "aspire-dashboard",
+                "-p", "18888:18888",
+                "-p", "4317:18889",
+                "-e", "DASHBOARD__FRONTEND__AUTHMODE=Unsecured",
+                "mcr.microsoft.com/dotnet/aspire-dashboard:latest"
+            ],
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "silent",
+                "panel": "shared"
+            },
+            "detail": "Starts Aspire Dashboard in Docker (UI: http://localhost:18888, OTLP: localhost:4317). Requires Docker to be running.",
+            "isBackground": true
+        },
+        {
+            "label": "stop-aspire-dashboard",
+            "type": "shell",
+            "command": "docker",
+            "args": ["stop", "aspire-dashboard"],
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "silent",
+                "panel": "shared"
+            },
+            "detail": "Stops the Aspire Dashboard Docker container."
+        }
+    ]
+}

@@ -16,6 +16,11 @@ from services.logging_config import setup_logging, get_logger
 
 setup_logging()  # Uses OTEL_LOGGING_ENABLED env var (default: False)
 
+# Initialize OpenTelemetry tracing (after logging)
+from services.telemetry import setup_telemetry
+
+setup_telemetry()
+
 from services.document_processor import ExtractionService
 
 # Import UI modules
@@ -29,8 +34,11 @@ from ui.components import render_sidebar
 # Get logger (logging is already configured at import time)
 logger = get_logger(__name__)
 
+# Application version (single source of truth: pyproject.toml)
+APP_VERSION = "0.2.0"
+
 # Log application startup
-logger.info("RFP Analyzer application starting...")
+logger.info("RFP Analyzer v%s starting...", APP_VERSION)
 
 
 def get_scoring_guide() -> str:

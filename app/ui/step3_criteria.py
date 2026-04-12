@@ -6,6 +6,7 @@ user review before proceeding to proposal scoring.
 
 import streamlit as st
 import asyncio
+import json
 import time
 
 from services.utils import format_duration
@@ -47,6 +48,18 @@ def render_step3():
     # Check if criteria have already been extracted
     if st.session_state.extracted_criteria:
         _render_criteria_review()
+
+        # Download criteria as JSON
+        criteria_json = json.dumps(
+            st.session_state.extracted_criteria, indent=2, ensure_ascii=False,
+        )
+        st.download_button(
+            label="📥 Download Scoring Criteria (JSON)",
+            data=criteria_json,
+            file_name="extracted_scoring_criteria.json",
+            mime="application/json",
+            width="stretch",
+        )
 
         if st.button(
             "Continue to Step 4: Score Proposals →",

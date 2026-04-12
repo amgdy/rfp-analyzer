@@ -19,6 +19,29 @@
             "justMyCode": true
         },
         {
+            "name": "Streamlit: Run with OTEL (Aspire Dashboard)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "streamlit",
+            "args": [
+                "run",
+                "${workspaceFolder}/app/main.py",
+                "--server.port=8501"
+            ],
+            "cwd": "${workspaceFolder}/app",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/app",
+                "OTEL_EXPORTER_OTLP_ENDPOINT": "http://localhost:4317",
+                "OTEL_LOGGING_ENABLED": "true",
+                "OTEL_TRACING_ENABLED": "true",
+                "OTEL_SERVICE_NAME": "rfp-analyzer",
+                "ENABLE_SENSITIVE_DATA": "true"
+            },
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "preLaunchTask": "start-aspire-dashboard"
+        },
+        {
             "name": "Streamlit: Debug with UV (no browser)",
             "type": "debugpy",
             "request": "launch",

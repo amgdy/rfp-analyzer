@@ -34,14 +34,21 @@ services:
       - AZURE_TENANT_ID=${AZURE_TENANT_ID:-}
       - AZURE_CLIENT_ID=${AZURE_CLIENT_ID:-}
       - AZURE_CLIENT_SECRET=${AZURE_CLIENT_SECRET:-}
+
+      # OpenTelemetry / Observability
+      - OTEL_LOGGING_ENABLED=${OTEL_LOGGING_ENABLED:-false}
+      - OTEL_TRACING_ENABLED=${OTEL_TRACING_ENABLED:-false}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      - APPLICATIONINSIGHTS_CONNECTION_STRING=${APPLICATIONINSIGHTS_CONNECTION_STRING:-}
+      - OTEL_SERVICE_NAME=rfp-analyzer
     
-    # Resource limits
+    # Resource limits (sized for large document processing)
     deploy:
       resources:
         limits:
-          memory: 2G
+          memory: 4G
         reservations:
-          memory: 512M
+          memory: 1G
     
     # Restart policy
     restart: unless-stopped

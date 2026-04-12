@@ -203,6 +203,12 @@ def render_sidebar():
 
         st.divider()
         st.caption("Powered by Azure AI Services, Microsoft Foundry & Agent Framework")
+        # Show app version
+        try:
+            from main import APP_VERSION
+            st.caption(f"v{APP_VERSION}")
+        except ImportError:
+            pass
 
 
 def render_results(results: dict):
