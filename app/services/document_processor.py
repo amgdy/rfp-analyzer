@@ -21,6 +21,7 @@ from .content_understanding_client import AzureContentUnderstandingClient
 from .document_intelligence_client import AzureDocumentIntelligenceClient
 from .logging_config import get_logger
 from .token_utils import estimate_token_count
+from .utils import clean_extracted_markdown
 
 load_dotenv()
 
@@ -222,6 +223,10 @@ class DocumentProcessor:
         if contents:
             content = contents[0]
             markdown = content.get("markdown", "")
+
+            # Clean up the raw markdown for better readability
+            markdown = clean_extracted_markdown(markdown)
+
             parse_duration = time.time() - parse_start
             analyze_duration = time.time() - analyze_start
             logger.info(

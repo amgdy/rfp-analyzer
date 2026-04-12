@@ -52,6 +52,44 @@ def format_duration(seconds: float) -> str:
     return f"{minutes}m {remaining_seconds:.1f}s"
 
 
+def clean_extracted_markdown(markdown: str) -> str:
+    """Clean extracted markdown from Azure document processors.
+
+    Fixes common issues produced by Document Intelligence and
+    Content Understanding:
+    - Collapses excessive blank lines
+    - Ensures headers have surrounding blank lines
+    - Normalises non-breaking / special whitespace
+    - Strips trailing whitespace per line
+
+    Unlike :func:`clean_extracted_text`, this preserves full markdown
+    formatting (headers, tables, emphasis, etc.) and is intended for
+    the extracted content that will be fed to AI agents.
+
+    Args:
+        markdown: Raw markdown from an Azure document processor
+
+    Returns:
+        Cleaned markdown string
+    """
+    if not markdown:
+        return ""
+
+    # Collapse runs of 3+ blank lines into 2
+    cleaned = re.sub(r"\n{4,}", "\n\n\n", markdown)
+
+    # Ensure headers (#) are preceded by a blank line unless at start
+    cleaned = re.sub(r"([^\n])\n(#{1,6} )", r"\1\n\n\2", cleaned)
+
+    # Normalise non-breaking / special spaces
+    cleaned = cleaned.replace("\u00a0", " ")
+
+    # Strip trailing whitespace on each line
+    cleaned = "\n".join(line.rstrip() for line in cleaned.split("\n"))
+
+    return cleaned.strip()
+
+
 def clean_extracted_text(text: str) -> str:
     """Clean extracted document text for executive-ready display.
 
