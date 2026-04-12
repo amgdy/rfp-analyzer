@@ -20,6 +20,7 @@ from dotenv import load_dotenv
 from .content_understanding_client import AzureContentUnderstandingClient
 from .document_intelligence_client import AzureDocumentIntelligenceClient
 from .logging_config import get_logger
+from .token_utils import estimate_token_count
 
 load_dotenv()
 
@@ -170,11 +171,13 @@ class DocumentProcessor:
             )
 
         duration = time.time() - extract_start
+        content_tokens = estimate_token_count(content)
         logger.info(
-            "[REQ:%s] ✅ Document extraction completed in %.3fs (%d chars)",
+            "[REQ:%s] ✅ Document extraction completed in %.3fs (%d chars, ~%d tokens)",
             request_id,
             duration,
             len(content),
+            content_tokens,
         )
         return content
 

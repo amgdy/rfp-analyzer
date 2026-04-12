@@ -19,6 +19,13 @@ from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
 from .logging_config import get_logger
+from .token_utils import (
+    estimate_token_count,
+    calculate_token_budget,
+    fits_in_context,
+    truncate_content,
+    split_content_by_tokens,
+)
 from .utils import parse_json_response
 
 load_dotenv()
@@ -226,6 +233,10 @@ You MUST respond with a valid JSON object matching this exact structure:
         """
         Extract scoring criteria from the RFP document.
 
+        For large RFP documents that exceed the model context window,
+        automatically splits content into chunks, extracts criteria from
+        each chunk, and merges the results.
+
         Args:
             rfp_content: The RFP document content in markdown
             progress_callback: Optional callback for progress updates
@@ -235,11 +246,57 @@ You MUST respond with a valid JSON object matching this exact structure:
             ExtractedCriteria object with all identified criteria
         """
         start_time = time.time()
-        logger.info("Starting criteria extraction (effort: %s)...", reasoning_effort)
+        rfp_tokens = estimate_token_count(rfp_content)
+        logger.info(
+            "Starting criteria extraction (effort: %s, content: ~%d tokens)...",
+            reasoning_effort,
+            rfp_tokens,
+        )
 
         if progress_callback:
             progress_callback("Analyzing RFP structure and requirements...")
 
+        # Calculate available budget for user content
+        budget = calculate_token_budget(self.SYSTEM_INSTRUCTIONS)
+        # Reserve tokens for the prompt template text around the RFP content
+        prompt_overhead = estimate_token_count(
+            "Please analyze the following RFP document and extract comprehensive "
+            "scoring criteria.\n\n## RFP DOCUMENT:\n\n---\n\nREQUIREMENTS:\n"
+            "1. Identify all evaluation criteria\n2. Assign weights\n"
+            "3. Provide guidance\n4. Include title and summary\n"
+            "Respond with ONLY valid JSON matching the schema."
+        )
+        content_budget = budget - prompt_overhead
+
+        if rfp_tokens <= content_budget:
+            # Content fits in a single call
+            logger.info(
+                "RFP content (~%d tokens) fits within budget (%d tokens) — single-call extraction",
+                rfp_tokens,
+                content_budget,
+            )
+            return await self._extract_criteria_single(
+                rfp_content, progress_callback, reasoning_effort, start_time
+            )
+        else:
+            # Content too large — use chunked extraction with merge
+            logger.warning(
+                "RFP content (~%d tokens) exceeds budget (%d tokens) — using chunked extraction",
+                rfp_tokens,
+                content_budget,
+            )
+            return await self._extract_criteria_chunked(
+                rfp_content, content_budget, progress_callback, reasoning_effort, start_time
+            )
+
+    async def _extract_criteria_single(
+        self,
+        rfp_content: str,
+        progress_callback: Optional[Callable[[str], None]],
+        reasoning_effort: str,
+        start_time: float,
+    ) -> ExtractedCriteria:
+        """Extract criteria from RFP content in a single LLM call."""
         user_prompt = f"""Please analyze the following RFP document and extract comprehensive scoring criteria.
 
 ## RFP DOCUMENT:
@@ -300,6 +357,132 @@ Respond with ONLY valid JSON matching the schema in your instructions."""
         except Exception as e:
             logger.error("Criteria extraction failed: %s", str(e))
             raise
+
+    async def _extract_criteria_chunked(
+        self,
+        rfp_content: str,
+        content_budget: int,
+        progress_callback: Optional[Callable[[str], None]],
+        reasoning_effort: str,
+        start_time: float,
+    ) -> ExtractedCriteria:
+        """Extract criteria from chunked RFP content and merge results.
+
+        Splits the RFP into chunks, extracts criteria from each, then
+        deduplicates and normalizes the combined criteria.
+        """
+        chunks = split_content_by_tokens(rfp_content, content_budget)
+        logger.info("Split RFP into %d chunks for criteria extraction", len(chunks))
+
+        all_criteria_data: list[dict] = []
+        rfp_title = ""
+        rfp_summary = ""
+
+        for i, chunk in enumerate(chunks):
+            if progress_callback:
+                progress_callback(
+                    f"Extracting criteria from chunk {i + 1}/{len(chunks)}..."
+                )
+
+            chunk_prompt = f"""Please analyze the following section (part {i + 1} of {len(chunks)}) of an RFP document and extract scoring criteria found in this section.
+
+## RFP DOCUMENT (Section {i + 1}/{len(chunks)}):
+
+{chunk}
+
+---
+
+REQUIREMENTS:
+1. Identify all evaluation criteria (explicit and implied) in this section
+2. Assign preliminary weights (they will be normalized later)
+3. Provide detailed evaluation guidance for each criterion
+4. Include the RFP title and a brief summary if found in this section
+
+Respond with ONLY valid JSON matching the schema in your instructions."""
+
+            try:
+                agent = Agent(
+                    client=self.client,
+                    instructions=self.SYSTEM_INSTRUCTIONS,
+                    name=f"Criteria Extraction Agent (chunk {i + 1})",
+                    default_options={
+                        "reasoning": {"effort": reasoning_effort, "summary": "detailed"}
+                    },
+                )
+
+                result = await agent.run(chunk_prompt)
+                chunk_data = self._parse_response(result.text)
+                all_criteria_data.append(chunk_data)
+
+                # Capture title/summary from first chunk that has them
+                if not rfp_title and chunk_data.get("rfp_title", "Unknown RFP") != "Unknown RFP":
+                    rfp_title = chunk_data["rfp_title"]
+                if not rfp_summary and chunk_data.get("rfp_summary"):
+                    rfp_summary = chunk_data["rfp_summary"]
+
+                logger.info(
+                    "Chunk %d/%d: extracted %d criteria",
+                    i + 1,
+                    len(chunks),
+                    len(chunk_data.get("criteria", [])),
+                )
+
+            except Exception as e:
+                logger.error("Criteria extraction failed for chunk %d: %s", i + 1, str(e))
+                # Continue with other chunks
+
+        # Merge criteria from all chunks
+        merged = self._merge_chunked_criteria(all_criteria_data, rfp_title, rfp_summary)
+
+        duration = time.time() - start_time
+        logger.info(
+            "Chunked criteria extraction completed in %.2fs - Merged %d criteria from %d chunks",
+            duration,
+            len(merged.get("criteria", [])),
+            len(chunks),
+        )
+
+        return ExtractedCriteria(**merged)
+
+    def _merge_chunked_criteria(
+        self,
+        all_data: list[dict],
+        rfp_title: str,
+        rfp_summary: str,
+    ) -> dict:
+        """Merge criteria extracted from multiple chunks.
+
+        Deduplicates by criterion name (case-insensitive) and normalizes
+        weights to sum to 100.
+        """
+        seen_names: dict[str, dict] = {}
+
+        for chunk_data in all_data:
+            for criterion in chunk_data.get("criteria", []):
+                name_key = criterion.get("name", "").lower().strip()
+                if name_key and name_key not in seen_names:
+                    seen_names[name_key] = criterion
+
+        criteria_list = list(seen_names.values())
+
+        # Re-assign criterion IDs
+        for i, c in enumerate(criteria_list, 1):
+            c["criterion_id"] = f"C-{i}"
+
+        # Normalize weights to sum to 100
+        total_weight = sum(c.get("weight", 0) for c in criteria_list)
+        if criteria_list and total_weight > 0 and abs(total_weight - 100) > 0.1:
+            for c in criteria_list:
+                c["weight"] = (c.get("weight", 0) / total_weight) * 100
+
+        return {
+            "rfp_title": rfp_title or "Unknown RFP",
+            "rfp_summary": rfp_summary or "Large RFP document (processed in chunks)",
+            "total_weight": 100.0,
+            "criteria": criteria_list,
+            "extraction_notes": f"Extracted from {len(all_data)} document chunks, "
+            f"merged {len(criteria_list)} unique criteria",
+        }
 
     def _parse_response(self, response_text: str) -> dict:
         """Parse the agent response into a dictionary."""
@@ -460,6 +643,10 @@ You MUST respond with a valid JSON object:
         """
         Score the proposal against extracted criteria.
 
+        For large proposals that exceed the model context window,
+        automatically splits content into chunks, scores each chunk,
+        and merges scores by taking the best evidence per criterion.
+
         Args:
             criteria: ExtractedCriteria from the extraction agent
             proposal_content: The vendor proposal content
@@ -470,10 +657,12 @@ You MUST respond with a valid JSON object:
             ProposalEvaluationV2 with complete scoring results
         """
         start_time = time.time()
+        proposal_tokens = estimate_token_count(proposal_content)
         logger.info(
-            "Starting proposal scoring against %d criteria (effort: %s)...",
+            "Starting proposal scoring against %d criteria (effort: %s, proposal: ~%d tokens)...",
             len(criteria.criteria),
             reasoning_effort,
+            proposal_tokens,
         )
 
         if progress_callback:
@@ -500,6 +689,48 @@ You MUST respond with a valid JSON object:
             criteria_json=criteria_json
         )
 
+        # Calculate available budget for proposal content
+        budget = calculate_token_budget(system_instructions)
+        # Reserve tokens for the prompt template text around the proposal
+        prompt_overhead = estimate_token_count(
+            f"Please evaluate the following vendor proposal against the scoring criteria.\n\n"
+            f"## RFP CONTEXT:\n- Title: {criteria.rfp_title}\n- Summary: {criteria.rfp_summary}\n\n"
+            f"## VENDOR PROPOSAL:\n\n---\n\nREQUIREMENTS:\n1-5...\nRespond with ONLY valid JSON."
+        )
+        content_budget = budget - prompt_overhead
+
+        if proposal_tokens <= content_budget:
+            logger.info(
+                "Proposal (~%d tokens) fits within budget (%d tokens) — single-call scoring",
+                proposal_tokens,
+                content_budget,
+            )
+            return await self._score_proposal_single(
+                criteria, criteria_json, system_instructions, proposal_content,
+                progress_callback, reasoning_effort, start_time,
+            )
+        else:
+            logger.warning(
+                "Proposal (~%d tokens) exceeds budget (%d tokens) — using chunked scoring",
+                proposal_tokens,
+                content_budget,
+            )
+            return await self._score_proposal_chunked(
+                criteria, criteria_json, system_instructions, proposal_content,
+                content_budget, progress_callback, reasoning_effort, start_time,
+            )
+
+    async def _score_proposal_single(
+        self,
+        criteria: ExtractedCriteria,
+        criteria_json: str,
+        system_instructions: str,
+        proposal_content: str,
+        progress_callback: Optional[Callable[[str], None]],
+        reasoning_effort: str,
+        start_time: float,
+    ) -> ProposalEvaluationV2:
+        """Score proposal content in a single LLM call."""
         user_prompt = f"""Please evaluate the following vendor proposal against the scoring criteria.
 
 ## RFP CONTEXT:
@@ -565,6 +796,171 @@ Respond with ONLY valid JSON matching the schema in your instructions."""
         except Exception as e:
             logger.error("Proposal scoring failed: %s", str(e))
             raise
+
+    async def _score_proposal_chunked(
+        self,
+        criteria: ExtractedCriteria,
+        criteria_json: str,
+        system_instructions: str,
+        proposal_content: str,
+        content_budget: int,
+        progress_callback: Optional[Callable[[str], None]],
+        reasoning_effort: str,
+        start_time: float,
+    ) -> ProposalEvaluationV2:
+        """Score a large proposal by processing chunks and merging results.
+
+        For each criterion, the highest score across all chunks is kept
+        (since different parts of the proposal may address different criteria).
+        """
+        chunks = split_content_by_tokens(proposal_content, content_budget)
+        logger.info("Split proposal into %d chunks for scoring", len(chunks))
+
+        chunk_evaluations: list[dict] = []
+
+        for i, chunk in enumerate(chunks):
+            if progress_callback:
+                progress_callback(
+                    f"Scoring proposal chunk {i + 1}/{len(chunks)}..."
+                )
+
+            chunk_prompt = f"""Please evaluate the following SECTION (part {i + 1} of {len(chunks)}) of a vendor proposal against the scoring criteria.
+
+NOTE: This is a partial document. Score criteria based ONLY on evidence found in this section.
+If a criterion is not addressed in this section, assign a score of 0 for that criterion.
+
+## RFP CONTEXT:
+- Title: {criteria.rfp_title}
+- Summary: {criteria.rfp_summary}
+
+## VENDOR PROPOSAL (Section {i + 1}/{len(chunks)}):
+
+{chunk}
+
+---
+
+REQUIREMENTS:
+1. Score each criterion from 0-100 based on evidence in THIS section only
+2. Calculate weighted scores
+3. Provide evidence and justification for each score
+4. Assign score 0 for criteria not addressed in this section
+5. Assign an overall grade
+
+Respond with ONLY valid JSON matching the schema in your instructions."""
+
+            try:
+                agent = Agent(
+                    client=self.client,
+                    instructions=system_instructions,
+                    name=f"Proposal Scoring Agent (chunk {i + 1})",
+                    default_options={
+                        "reasoning": {"effort": reasoning_effort, "summary": "detailed"}
+                    },
+                )
+
+                result = await agent.run(chunk_prompt)
+                chunk_data = self._parse_response(result.text, criteria)
+                chunk_evaluations.append(chunk_data)
+
+                logger.info(
+                    "Chunk %d/%d scored — total: %.2f",
+                    i + 1,
+                    len(chunks),
+                    chunk_data.get("total_score", 0),
+                )
+
+            except Exception as e:
+                logger.error("Scoring failed for chunk %d: %s", i + 1, str(e))
+
+        if not chunk_evaluations:
+            raise RuntimeError("All proposal chunks failed to score")
+
+        # Merge chunk evaluations: take best score per criterion
+        merged = self._merge_chunked_scores(chunk_evaluations, criteria)
+
+        duration = time.time() - start_time
+        logger.info(
+            "Chunked proposal scoring completed in %.2fs - Total score: %.2f (from %d chunks)",
+            duration,
+            merged.get("total_score", 0),
+            len(chunks),
+        )
+
+        return ProposalEvaluationV2(**merged)
+
+    def _merge_chunked_scores(
+        self,
+        chunk_evaluations: list[dict],
+        criteria: ExtractedCriteria,
+    ) -> dict:
+        """Merge scores from multiple chunks by taking the best per criterion.
+
+        For each criterion, selects the chunk that gave the highest raw_score,
+        keeping its evidence, justification, strengths, and gaps.
+        """
+        best_scores: dict[str, dict] = {}
+
+        for eval_data in chunk_evaluations:
+            for cs in eval_data.get("criterion_scores", []):
+                cid = cs.get("criterion_id", "")
+                raw = cs.get("raw_score", 0) or 0
+                if cid not in best_scores or raw > (best_scores[cid].get("raw_score", 0) or 0):
+                    best_scores[cid] = cs
+
+        # Recalculate weighted scores and totals
+        merged_scores = list(best_scores.values())
+        for cs in merged_scores:
+            weight = cs.get("weight", 0)
+            raw = cs.get("raw_score", 0)
+            cs["weighted_score"] = round((raw * weight) / 100, 2)
+
+        total_score = round(sum(cs.get("weighted_score", 0) for cs in merged_scores), 2)
+
+        # Determine grade
+        if total_score >= 90:
+            grade = "A"
+        elif total_score >= 80:
+            grade = "B"
+        elif total_score >= 70:
+            grade = "C"
+        elif total_score >= 60:
+            grade = "D"
+        else:
+            grade = "F"
+
+        # Use first evaluation for non-score fields, prefer non-empty values
+        base = chunk_evaluations[0]
+        for eval_data in chunk_evaluations[1:]:
+            for field in ["supplier_name", "supplier_site", "executive_summary", "recommendation"]:
+                if not base.get(field) and eval_data.get(field):
+                    base[field] = eval_data[field]
+
+        # Merge list fields from all chunks
+        all_strengths = []
+        all_weaknesses = []
+        all_recommendations = []
+        for eval_data in chunk_evaluations:
+            all_strengths.extend(eval_data.get("overall_strengths", []))
+            all_weaknesses.extend(eval_data.get("overall_weaknesses", []))
+            all_recommendations.extend(eval_data.get("recommendations", []))
+
+        return {
+            "rfp_title": base.get("rfp_title", criteria.rfp_title),
+            "supplier_name": base.get("supplier_name", "Unknown Vendor"),
+            "supplier_site": base.get("supplier_site", "Unknown"),
+            "response_id": base.get("response_id", "RESP-CHUNKED"),
+            "evaluation_date": base.get("evaluation_date", ""),
+            "total_score": total_score,
+            "score_percentage": total_score,
+            "grade": grade,
+            "recommendation": base.get("recommendation", ""),
+            "criterion_scores": merged_scores,
+            "executive_summary": base.get("executive_summary", "Evaluation based on chunked analysis"),
+            "overall_strengths": list(dict.fromkeys(all_strengths)),  # deduplicate preserving order
+            "overall_weaknesses": list(dict.fromkeys(all_weaknesses)),
+            "recommendations": list(dict.fromkeys(all_recommendations)),
+            "risk_assessment": base.get("risk_assessment", ""),
+        }
 
     def _parse_response(self, response_text: str, criteria: ExtractedCriteria) -> dict:
         """Parse the agent response into a dictionary."""

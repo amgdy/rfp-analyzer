@@ -20,6 +20,11 @@ from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
 from .logging_config import get_logger
+from .token_utils import (
+    estimate_token_count,
+    calculate_token_budget,
+    truncate_content,
+)
 from .utils import parse_json_response
 
 # Optional dependency for Word document generation
@@ -205,6 +210,9 @@ Respond with a valid JSON object:
         """
         Compare multiple vendor evaluations.
 
+        If the formatted evaluations exceed the model context window,
+        automatically truncates the summary to fit.
+
         Args:
             evaluations: List of evaluation results from individual vendor scoring
             rfp_title: Title of the RFP
@@ -226,6 +234,24 @@ Respond with a valid JSON object:
 
         # Format evaluations for the prompt
         evaluations_summary = self._format_evaluations_for_prompt(evaluations)
+
+        # Check token budget and truncate if needed
+        budget = calculate_token_budget(self.SYSTEM_INSTRUCTIONS)
+        prompt_overhead = estimate_token_count(
+            f"Please compare the following vendor evaluations.\n\n"
+            f"## RFP TITLE: {rfp_title}\n\n## VENDOR EVALUATIONS:\n\n---\n\n"
+            f"REQUIREMENTS:\n1-5...\nRespond with ONLY valid JSON."
+        )
+        content_budget = budget - prompt_overhead
+        summary_tokens = estimate_token_count(evaluations_summary)
+
+        if summary_tokens > content_budget:
+            logger.warning(
+                "Comparison summary (~%d tokens) exceeds budget (%d tokens) — truncating",
+                summary_tokens,
+                content_budget,
+            )
+            evaluations_summary = truncate_content(evaluations_summary, content_budget)
 
         user_prompt = f"""Please compare the following vendor evaluations and provide a comprehensive analysis.
 

@@ -85,11 +85,15 @@ class AzureDocumentIntelligenceClient:
     # Maximum file size in bytes (500 MB for standard tier)
     MAX_FILE_SIZE_BYTES = 500 * 1024 * 1024  # 500 MB
 
+    # Maximum page count for prebuilt-layout model
+    MAX_PAGE_COUNT = 2000
+
     def analyze_document(
         self,
         file_bytes: bytes,
         request_id: str = "unknown",
         include_figures: bool = True,
+        pages: str = None,
     ) -> str:
         """
         Analyze a document and return content as markdown.
@@ -98,6 +102,8 @@ class AzureDocumentIntelligenceClient:
             file_bytes: The document content as bytes
             request_id: Unique request ID for logging correlation
             include_figures: Whether to include figure/image analysis
+            pages: Optional page range to analyze (e.g., "1-100", "1-50,55-100").
+                   If None, all pages are analyzed (up to 2000 pages).
 
         Returns:
             Extracted content as markdown string
@@ -110,9 +116,10 @@ class AzureDocumentIntelligenceClient:
         # Check file size before sending
         file_size_mb = len(file_bytes) / (1024 * 1024)
         logger.info(
-            "[REQ:%s] Starting Document Intelligence analysis (file size: %.2f MB)...",
+            "[REQ:%s] Starting Document Intelligence analysis (file size: %.2f MB, pages: %s)...",
             request_id,
             file_size_mb,
+            pages or "all",
         )
 
         if len(file_bytes) > self.MAX_FILE_SIZE_BYTES:
@@ -127,37 +134,58 @@ class AzureDocumentIntelligenceClient:
             # Include FIGURES output option to enable figure extraction with cropped images
             output_options = [AnalyzeOutputOption.FIGURES] if include_figures else None
 
-            poller = self.client.begin_analyze_document(
-                model_id="prebuilt-layout",
-                body=file_bytes,
-                content_type="application/octet-stream",
-                output_content_format=DocumentContentFormat.MARKDOWN,
-                output=output_options,
-            )
+            # Build keyword arguments — include pages only when specified
+            analyze_kwargs = {
+                "model_id": "prebuilt-layout",
+                "body": file_bytes,
+                "content_type": "application/octet-stream",
+                "output_content_format": DocumentContentFormat.MARKDOWN,
+                "output": output_options,
+            }
+            if pages:
+                analyze_kwargs["pages"] = pages
+                logger.info("[REQ:%s] Analyzing specific pages: %s", request_id, pages)
+
+            poller = self.client.begin_analyze_document(**analyze_kwargs)
 
             logger.info(
-                "[REQ:%s] Document analysis started, waiting for result...", request_id
+                "[REQ:%s] Document analysis started, waiting for result "
+                "(large documents may take several minutes)...",
+                request_id,
             )
 
             result: AnalyzeResult = poller.result()
             operation_id = poller.details.get("operation_id")
 
             analyze_duration = time.time() - analyze_start
+
+            # Log page count for large document awareness
+            page_count = len(result.pages) if hasattr(result, "pages") and result.pages else 0
             logger.info(
-                "[REQ:%s] Document analysis completed in %.2fs",
+                "[REQ:%s] Document analysis completed in %.2fs (%d pages)",
                 request_id,
                 analyze_duration,
+                page_count,
             )
+            if page_count > 100:
+                logger.info(
+                    "[REQ:%s] Large document detected (%d pages) — extraction may produce substantial content",
+                    request_id,
+                    page_count,
+                )
 
             # Extract markdown content including figure descriptions
             markdown_content = self._build_markdown_from_result(
                 result, request_id, operation_id, include_figures
             )
 
+            # Log content size with estimated token count
+            estimated_tokens = int(len(markdown_content) / 3.5)
             logger.info(
-                "[REQ:%s] Extracted %d characters of markdown content",
+                "[REQ:%s] Extracted %d characters (~%d tokens) of markdown content",
                 request_id,
                 len(markdown_content),
+                estimated_tokens,
             )
 
             return markdown_content
@@ -456,6 +484,7 @@ class AzureDocumentIntelligenceClient:
         file_bytes: bytes,
         request_id: str = "unknown",
         include_figures: bool = True,
+        pages: str = None,
     ) -> str:
         """
         Async version of analyze_document for parallel processing.
@@ -464,11 +493,12 @@ class AzureDocumentIntelligenceClient:
             file_bytes: The document content as bytes
             request_id: Unique request ID for logging correlation
             include_figures: Whether to include figure/image analysis
+            pages: Optional page range to analyze (e.g., "1-100")
 
         Returns:
             Extracted content as markdown string
         """
         # Run the blocking API call in a thread pool
         return await asyncio.to_thread(
-            self.analyze_document, file_bytes, request_id, include_figures
+            self.analyze_document, file_bytes, request_id, include_figures, pages
         )

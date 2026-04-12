@@ -18,6 +18,12 @@ from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
 from .logging_config import get_logger
+from .token_utils import (
+    estimate_token_count,
+    calculate_token_budget,
+    truncate_content,
+    split_content_by_tokens,
+)
 
 load_dotenv()
 
@@ -158,6 +164,10 @@ class ScoringAgent:
         """
         Evaluate a vendor proposal against RFP requirements using Azure OpenAI reasoning model.
         
+        For large documents that exceed the model context window, automatically
+        manages content to fit within token limits (truncation with priority to
+        proposal content).
+        
         Args:
             rfp_content: The RFP document content in markdown
             proposal_content: The vendor proposal content in markdown
@@ -169,9 +179,11 @@ class ScoringAgent:
             Dictionary containing evaluation results with timing metadata
         """
         evaluate_start = time.time()
+        rfp_tokens = estimate_token_count(rfp_content)
+        proposal_tokens = estimate_token_count(proposal_content)
         logger.info("[%s] Starting proposal evaluation (effort: %s)...", datetime.now().isoformat(), reasoning_effort)
-        logger.info("[%s] RFP content length: %d chars", datetime.now().isoformat(), len(rfp_content))
-        logger.info("[%s] Proposal content length: %d chars", datetime.now().isoformat(), len(proposal_content))
+        logger.info("[%s] RFP content: %d chars (~%d tokens)", datetime.now().isoformat(), len(rfp_content), rfp_tokens)
+        logger.info("[%s] Proposal content: %d chars (~%d tokens)", datetime.now().isoformat(), len(proposal_content), proposal_tokens)
         
         # Use default guide if none provided
         if not scoring_guide:
@@ -180,8 +192,44 @@ class ScoringAgent:
         else:
             logger.info("[%s] Using custom scoring guide (%d chars)", datetime.now().isoformat(), len(scoring_guide))
         
-        # Prepare the system instructions and user prompt
+        # Prepare the system instructions
         system_instructions = self._get_system_instructions(scoring_guide)
+
+        # Check token budget and manage content if needed
+        budget = calculate_token_budget(system_instructions)
+        # Reserve tokens for the prompt template (headings, separators, instructions)
+        prompt_overhead = estimate_token_count(
+            "Please evaluate the following vendor proposal against the RFP requirements.\n\n"
+            "## RFP DOCUMENT\n---\n## VENDOR PROPOSAL\n---\n"
+            "IMPORTANT REMINDERS:\n1-8...\nRespond with ONLY a valid JSON object."
+        )
+        content_budget = budget - prompt_overhead
+
+        combined_tokens = rfp_tokens + proposal_tokens
+        if combined_tokens > content_budget:
+            logger.warning(
+                "[%s] Combined content (~%d tokens) exceeds budget (%d tokens) — managing content size",
+                datetime.now().isoformat(),
+                combined_tokens,
+                content_budget,
+            )
+            if progress_callback:
+                progress_callback("Managing large document content to fit model context...")
+
+            # Strategy: give proposal 60% of budget, RFP 40% (proposal is what we're scoring)
+            proposal_budget = int(content_budget * 0.6)
+            rfp_budget = content_budget - proposal_budget
+
+            rfp_content = truncate_content(rfp_content, rfp_budget)
+            proposal_content = truncate_content(proposal_content, proposal_budget)
+
+            logger.info(
+                "[%s] Content managed — RFP: ~%d tokens, Proposal: ~%d tokens",
+                datetime.now().isoformat(),
+                estimate_token_count(rfp_content),
+                estimate_token_count(proposal_content),
+            )
+
         user_prompt = self._create_evaluation_prompt(rfp_content, proposal_content)
         
         logger.info("[%s] Sending request to Azure OpenAI reasoning model (deployment: %s, effort: %s)...", 
