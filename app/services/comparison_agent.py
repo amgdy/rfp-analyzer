@@ -181,7 +181,7 @@ Respond with a valid JSON object:
 
         self._validate_config()
 
-        endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+        endpoint = os.getenv("AZURE_OPENAI_ENDPOINT", "").rstrip("/")
         deployment_name = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME")
 
         self.client = OpenAIChatClient(
@@ -192,7 +192,7 @@ Respond with a valid JSON object:
         )
 
         self.deployment_name = deployment_name
-        logger.info("ComparisonAgent initialized")
+        logger.info("ComparisonAgent initialized with endpoint: %s", endpoint)
 
     def _validate_config(self):
         """Validate required configuration."""

@@ -215,7 +215,7 @@ You MUST respond with a valid JSON object matching this exact structure:
 
         self._validate_config()
 
-        endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+        endpoint = os.getenv("AZURE_OPENAI_ENDPOINT", "").rstrip("/")
         deployment_name = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME")
 
         self.client = OpenAIChatClient(
@@ -226,7 +226,7 @@ You MUST respond with a valid JSON object matching this exact structure:
         )
 
         self.deployment_name = deployment_name
-        logger.info("CriteriaExtractionAgent initialized")
+        logger.info("CriteriaExtractionAgent initialized with endpoint: %s", endpoint)
 
     def _validate_config(self):
         """Validate required configuration."""
@@ -659,7 +659,7 @@ You MUST respond with a valid JSON object:
 
         self._validate_config()
 
-        endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+        endpoint = os.getenv("AZURE_OPENAI_ENDPOINT", "").rstrip("/")
         deployment_name = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME")
 
         self.client = OpenAIChatClient(
@@ -670,7 +670,7 @@ You MUST respond with a valid JSON object:
         )
 
         self.deployment_name = deployment_name
-        logger.info("ProposalScoringAgent initialized")
+        logger.info("ProposalScoringAgent initialized with endpoint: %s", endpoint)
 
     def _validate_config(self):
         """Validate required configuration."""

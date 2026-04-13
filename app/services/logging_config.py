@@ -38,9 +38,16 @@ _logging_configured = False
 
 
 def _get_otel_enabled_default() -> bool:
-    """Get default value for log_to_otel from environment variable."""
-    env_value = os.getenv("OTEL_LOGGING_ENABLED", "false").lower()
-    return env_value in ("true", "1", "yes", "on")
+    """Get default value for log_to_otel from environment variable.
+    
+    Defaults to True when APPLICATIONINSIGHTS_CONNECTION_STRING is set,
+    allowing explicit override via OTEL_LOGGING_ENABLED=false.
+    """
+    env_value = os.getenv("OTEL_LOGGING_ENABLED", "").lower()
+    if env_value:
+        return env_value in ("true", "1", "yes", "on")
+    # Auto-enable when App Insights connection string is available
+    return bool(os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"))
 
 
 def setup_logging(

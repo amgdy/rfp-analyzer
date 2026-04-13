@@ -247,7 +247,7 @@ module rfpAnalyzer 'br/public:avm/res/app/container-app:0.22.0' = {
           }
           {
             name: 'AZURE_OPENAI_ENDPOINT'
-            value: '${azureOpenAiEndpoint}/openai/'
+            value: azureOpenAiEndpoint
           }
           {
             name: 'AZURE_OPENAI_DEPLOYMENT_NAME'
@@ -320,6 +320,26 @@ module rfpAnalyzerbackendRoleCognitiveServicesUserRG 'br/public:avm/res/authoriz
     // Non-required parameters
     principalType: 'ServicePrincipal'
     description: 'Role assignment for Cognitive Services User in Resource Group scope'
+  }
+}
+
+// Cognitive Services OpenAI User – required for keyless OpenAI API calls (Responses API)
+module rfpAnalyzerbackendRoleCognitiveServicesOpenAIUserRG 'br/public:avm/res/authorization/role-assignment/rg-scope:0.1.1' = {
+  params: {
+    principalId: rfpAnalyzerIdentity.outputs.principalId
+    roleDefinitionIdOrName: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd')
+    principalType: 'ServicePrincipal'
+    description: 'Role assignment for Cognitive Services OpenAI User in Resource Group scope'
+  }
+}
+
+// Monitoring Metrics Publisher – required for App Insights telemetry with managed identity
+module rfpAnalyzerbackendRoleMonitoringMetricsPublisherRG 'br/public:avm/res/authorization/role-assignment/rg-scope:0.1.1' = {
+  params: {
+    principalId: rfpAnalyzerIdentity.outputs.principalId
+    roleDefinitionIdOrName: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '3913510d-42f4-4e42-8a64-420c390055eb')
+    principalType: 'ServicePrincipal'
+    description: 'Role assignment for Monitoring Metrics Publisher in Resource Group scope'
   }
 }
 
