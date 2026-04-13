@@ -6,7 +6,7 @@ import time
 import uuid
 
 from services.utils import format_duration, clean_extracted_text
-from services.document_processor import ExtractionService
+from services.document_processor import ExtractionService, requires_ai_extraction
 from services.processing_queue import ProcessingQueue, QueueItemStatus
 from services.token_utils import estimate_token_count, MODEL_CONTEXT_WINDOW
 from services.logging_config import get_logger
@@ -108,6 +108,9 @@ def render_step2():
             st.session_state.step = 3
             st.rerun()
     else:
+        # Show file type categorization before extraction
+        _render_file_categorization()
+
         # Run extraction
         if st.button(
             "🔍 Extract Document Content",
@@ -125,6 +128,28 @@ def render_step2():
         logger.info("User navigating back to Step 1")
         st.session_state.step = 1
         st.rerun()
+
+
+def _render_file_categorization():
+    """Show users which files will use AI extraction vs direct read."""
+    all_files = []
+    if st.session_state.rfp_file:
+        all_files.append(st.session_state.rfp_file["name"])
+    all_files.extend(f["name"] for f in (st.session_state.proposal_files or []))
+
+    ai_files = [f for f in all_files if requires_ai_extraction(f)]
+    text_files = [f for f in all_files if not requires_ai_extraction(f)]
+
+    if ai_files:
+        st.info(
+            f"🔍 **{len(ai_files)} file(s) require AI extraction:** "
+            + ", ".join(f"`{f}`" for f in ai_files)
+        )
+    if text_files:
+        st.success(
+            f"📝 **{len(text_files)} file(s) will be read directly** (instant, no AI needed): "
+            + ", ".join(f"`{f}`" for f in text_files)
+        )
 
 
 def _render_content_previews():
@@ -264,20 +289,23 @@ def run_extraction_pipeline():
                     for item in extraction_queue.items:
                         icon = item.get_status_icon()
                         elapsed_time = format_duration(item.get_elapsed_time()) if item.start_time else "-"
+                        is_text = not requires_ai_extraction(item.name)
 
                         if item.item_type == "rfp":
                             label = f"📄 RFP: {item.name}"
                         else:
                             label = f"📝 Proposal: {item.name}"
 
+                        method = " _(direct read)_" if is_text else " _(AI extraction)_"
+
                         if item.status == QueueItemStatus.COMPLETED:
-                            st.success(f"{icon} {label} — `{elapsed_time}`")
+                            st.success(f"{icon} {label}{method} — `{elapsed_time}`")
                         elif item.status == QueueItemStatus.PROCESSING:
-                            st.info(f"{icon} {label} — Processing... `{elapsed_time}`")
+                            st.info(f"{icon} {label}{method} — Processing... `{elapsed_time}`")
                         elif item.status == QueueItemStatus.FAILED:
-                            st.error(f"{icon} {label} — Failed")
+                            st.error(f"{icon} {label}{method} — Failed")
                         else:
-                            st.warning(f"{icon} {label} — Waiting...")
+                            st.warning(f"{icon} {label}{method} — Waiting...")
 
             # Initial render
             render_status()

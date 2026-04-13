@@ -26,9 +26,9 @@ def render_step1():
 
         rfp_file = st.file_uploader(
             "Choose RFP file",
-            type=["pdf", "docx", "doc", "txt", "md"],
+            type=["pdf", "docx", "txt", "md"],
             key="rfp_uploader",
-            help="Supported formats: PDF, Word documents, Text files, Markdown"
+            help="PDF & DOCX → extracted via AI  |  TXT & MD → read directly (instant)"
         )
 
         if rfp_file is not None:
@@ -43,7 +43,7 @@ def render_step1():
                     "name": rfp_file.name
                 }
 
-        if st.session_state.rfp_file:
+            if st.session_state.rfp_file:
             st.success(f"✅ RFP ready: {st.session_state.rfp_file['name']}")
 
     with col2:
@@ -52,10 +52,10 @@ def render_step1():
 
         proposal_files = st.file_uploader(
             "Choose Vendor Proposal files",
-            type=["pdf", "docx", "doc", "txt", "md"],
+            type=["pdf", "docx", "txt", "md"],
             key="proposals_uploader",
             accept_multiple_files=True,
-            help="Supported formats: PDF, Word documents, Text files, Markdown"
+            help="PDF & DOCX → extracted via AI  |  TXT & MD → read directly (instant)"
         )
 
         if proposal_files:
@@ -85,6 +85,17 @@ def render_step1():
 
         if st.session_state.proposal_files:
             st.success(f"✅ {len(st.session_state.proposal_files)} proposal(s) ready")
+
+    # File type processing info
+    with st.expander("ℹ️ How different file formats are processed", expanded=False):
+        st.markdown(
+            "| Format | Processing | Speed |\n"
+            "|--------|-----------|-------|\n"
+            "| **PDF** | AI extraction (Content Understanding / Document Intelligence) | ~10-30s |\n"
+            "| **DOCX** | AI extraction or local conversion | ~5-20s |\n"
+            "| **TXT** | Read directly — no extraction needed | Instant |\n"
+            "| **MD** | Read directly — no extraction needed | Instant |"
+        )
 
     st.markdown("---")
 

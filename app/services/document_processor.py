@@ -43,6 +43,24 @@ class ExtractionService(str, Enum):
 # to .docx or .pdf first).
 _DOCX_EXTENSIONS = ("docx",)
 
+# ── File-type classification constants ──────────────────────────────────
+# Text-based formats are decoded directly as UTF-8 — no AI extraction needed.
+TEXT_EXTENSIONS = ("txt", "md")
+# Binary / structured formats require AI extraction (Azure AI services or local DOCX).
+AI_EXTRACTED_EXTENSIONS = ("pdf", "docx")
+
+
+def requires_ai_extraction(filename: str) -> bool:
+    """Return *True* if the file needs AI-based content extraction.
+
+    Text files (``.txt``, ``.md``) are read directly as UTF-8, so they skip
+    the extraction step.  Binary / structured formats (``.pdf``, ``.docx``)
+    require Azure AI services (Content Understanding or Document Intelligence)
+    or local DOCX conversion.
+    """
+    extension = filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
+    return extension not in TEXT_EXTENSIONS
+
 
 class DocumentProcessor:
     """
