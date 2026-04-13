@@ -67,7 +67,7 @@ flowchart TB
 
     subgraph AZURE["☁️ Azure AI Services"]
         direction LR
-        AOA["Azure OpenAI<br>(GPT-4.1+)"]
+        AOA["Azure OpenAI<br>(GPT-5.2 / GPT-4.1)"]
         ADI["Azure Document<br>Intelligence"]
         ACU["Azure AI Content<br>Understanding"]
     end
@@ -134,7 +134,7 @@ flowchart TB
         CUS --> CUC
         DIS --> DIC
         
-        Formats["📄 Supported Formats:<br>PDF, DOCX, PNG, JPG, JPEG, BMP, TIFF"]
+        Formats["📄 Supported Formats:<br>PDF, DOCX (AI extraction)<br>TXT, MD (read directly)"]
     end
     
     style DocProcessor fill:#e3f2fd,stroke:#1565c0
@@ -149,13 +149,13 @@ flowchart TB
     subgraph ScoringSystem["Scoring Agent System"]
         subgraph Agent1["Criteria Extraction Agent"]
             I1["Input: RFP Document (Markdown)"]
-            O1["Output: ExtractedCriteria<br>• rfp_title<br>• rfp_summary<br>• criteria[] with weights<br>• evaluation_guidance"]
+            O1["Output: ExtractedCriteria<br>• rfp_title<br>• rfp_summary<br>• criteria[] with weights<br>• evaluation_guidance<br>• confidence scores<br>• auto re-reasoning"]
             I1 --> O1
         end
         
         subgraph Agent2["Proposal Scoring Agent"]
             I2["Input: Proposal + ExtractedCriteria"]
-            O2["Output: ProposalEvaluation<br>• total_score<br>• criterion_scores[]<br>• strengths / weaknesses<br>• recommendation"]
+            O2["Output: ProposalEvaluation<br>• total_score<br>• criterion_scores[]<br>• strengths / weaknesses<br>• recommendation<br>• confidence per criterion<br>• reasoning_iterations"]
             I2 --> O2
         end
         
@@ -225,8 +225,8 @@ flowchart TB
     end
     
     subgraph Agent1["🔍 AGENT 1: Criteria Extraction"]
-        A1D["• Analyzes RFP requirements<br>• Identifies evaluation criteria<br>• Assigns weights total = 100%<br>• Provides scoring guidance"]
-        A1M["Model: Azure OpenAI GPT-4.1+"]
+        A1D["• Analyzes RFP requirements<br>• Identifies evaluation criteria<br>• Assigns weights total = 100%<br>• Provides scoring guidance<br>• Confidence scoring per criterion<br>• Auto re-reasoning on low confidence"]
+        A1M["Model: Azure OpenAI GPT-5.2"]
         A1O["Output: ExtractedCriteria"]
     end
     
@@ -234,14 +234,14 @@ flowchart TB
     
     subgraph Agent2["📊 AGENT 2: Proposal Scoring - Parallel"]
         direction LR
-        A2A["Scoring Agent<br>Vendor A<br>• Evaluates proposal<br>• Scores per criterion<br>• Provides evidence"]
-        A2B["Scoring Agent<br>Vendor B<br>• Evaluates proposal<br>• Scores per criterion<br>• Provides evidence"]
-        A2N["Scoring Agent<br>Vendor N<br>• Evaluates proposal<br>• Scores per criterion<br>• Provides evidence"]
+        A2A["Scoring Agent<br>Vendor A<br>• Evaluates proposal<br>• Scores per criterion<br>• Confidence scoring<br>• Re-reasons low-confidence"]
+        A2B["Scoring Agent<br>Vendor B<br>• Evaluates proposal<br>• Scores per criterion<br>• Confidence scoring<br>• Re-reasons low-confidence"]
+        A2N["Scoring Agent<br>Vendor N<br>• Evaluates proposal<br>• Scores per criterion<br>• Confidence scoring<br>• Re-reasons low-confidence"]
     end
     
     subgraph Agent3["🏆 AGENT 3: Comparison"]
         A3D["• Ranks all vendors by score<br>• Compares criterion performance<br>• Identifies best/worst performers<br>• Generates recommendations<br>• Assesses comparative risks"]
-        A3M["Model: Azure OpenAI GPT-4.1+"]
+        A3M["Model: Azure OpenAI GPT-5.2"]
         A3O["Output: ComparisonResult"]
     end
     
@@ -402,6 +402,8 @@ flowchart TB
     
     Roles --> R1["Azure AI Developer"]
     Roles --> R2["Cognitive Services User"]
+    Roles --> R3["Cognitive Services OpenAI User"]
+    Roles --> R4["Monitoring Metrics Publisher"]
     
     Main --> Outputs["Outputs"]
     Outputs --> O1["AZURE_CONTAINER_REGISTRY_ENDPOINT"]
@@ -425,14 +427,19 @@ flowchart TB
     Upload["👤 User uploads document(s)"]
     
     subgraph DocProc["Document Processor"]
-        V["1. Validate file type<br>PDF, DOCX, PNG, JPG, etc."]
+        V["1. Validate file type<br>PDF, DOCX, TXT, MD"]
         R["2. Read file bytes into memory"]
-        S["3. Select extraction service<br>based on user choice"]
+        S["3. Classify file type<br>AI extraction vs direct read"]
     end
     
     Upload --> DocProc
     
-    DocProc --> CU & DI
+    DocProc --> CU & DI & TextRead
+    
+    subgraph TextRead["Direct Read (TXT, MD)"]
+        TR1["UTF-8 decode"]
+        TR2["Instant — no AI needed"]
+    end
     
     subgraph CU["Content Understanding"]
         CU1["POST /contentunderstanding/analyzer"]
@@ -449,7 +456,7 @@ flowchart TB
         DI4["• Extract markdown"]
     end
     
-    CU & DI --> Output
+    CU & DI & TextRead --> Output
     
     subgraph Output["📄 Extracted Markdown"]
         O1["Stored in session:"]
@@ -512,6 +519,34 @@ flowchart TB
     style Session fill:#f3e5f5,stroke:#7b1fa2
     style Scoring fill:#e8f5e9,stroke:#388e3c
     style CA fill:#fff9c4,stroke:#f9a825
+```
+
+### Confidence Scoring & Auto Re-Reasoning
+
+Each agent produces confidence scores (0.0–1.0) for its outputs. When confidence falls below the configurable `CONFIDENCE_THRESHOLD` (default 0.7), the system automatically triggers a deeper analysis pass.
+
+```mermaid
+flowchart TB
+    subgraph Initial["Initial Extraction / Scoring"]
+        I1["LLM Call → Results with confidence scores"]
+    end
+
+    I1 --> Check{"Overall confidence<br>≥ threshold?"}
+
+    Check -- Yes --> Done["✅ Accept results"]
+    Check -- No --> ReReason
+
+    subgraph ReReason["Re-Reasoning Pass"]
+        R1["Identify low-confidence items"]
+        R2["Follow-up prompt:<br>'Re-examine with deeper analysis'"]
+        R3["Increase reasoning effort to 'high'"]
+        R4["Merge: keep higher-confidence version"]
+    end
+
+    ReReason --> Final["📊 Final Results<br>(improved confidence)"]
+
+    style Initial fill:#e3f2fd,stroke:#1565c0
+    style ReReason fill:#fff3e0,stroke:#ef6c00
 ```
 
 ### Large Document Chunking Process
@@ -635,12 +670,14 @@ flowchart TB
 flowchart TB
     MI["🔐 User-Assigned Managed Identity<br>rfp-analyzer-identity"]
     
-    MI --> R1 & R2 & R3
+    MI --> R1 & R2 & R3 & R4 & R5
     
     subgraph Roles["Role Assignments"]
         R1["Azure AI Developer<br><br>Scope: Resource Group<br><br>Allows:<br>• Create/manage AI resources<br>• Deploy models"]
         R2["Cognitive Services User<br><br>Scope: Resource Group<br><br>Allows:<br>• Use AI services<br>• Make API calls"]
-        R3["AcrPull<br><br>Scope: Container Registry<br><br>Allows:<br>• Pull images"]
+        R3["Cognitive Services OpenAI User<br><br>Scope: Resource Group<br><br>Allows:<br>• Keyless OpenAI API access<br>• Responses API calls"]
+        R4["Monitoring Metrics Publisher<br><br>Scope: Resource Group<br><br>Allows:<br>• Publish telemetry metrics<br>• App Insights data ingestion"]
+        R5["AcrPull<br><br>Scope: Container Registry<br><br>Allows:<br>• Pull images"]
     end
     
     subgraph Security["🛡️ Security Features"]
@@ -718,6 +755,8 @@ flowchart TB
         ACA10["• AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT"]
         ACA11["• AZURE_CLIENT_ID (managed identity)"]
         ACA12["• APPLICATIONINSIGHTS_CONNECTION_STRING"]
+        ACA13["• OTEL_LOGGING_ENABLED"]
+        ACA14["• OTEL_TRACING_ENABLED"]
     end
     
     Source --> Docker --> ACR --> ACA
@@ -790,6 +829,7 @@ classDiagram
         +float weight
         +int max_score
         +str evaluation_guidance
+        +float confidence
     }
     
     class ExtractedCriteria {
@@ -798,6 +838,7 @@ classDiagram
         +float total_weight
         +List~ScoringCriterion~ criteria
         +str extraction_notes
+        +float overall_confidence
     }
     
     class CriterionScore {
@@ -810,6 +851,8 @@ classDiagram
         +str justification
         +List~str~ strengths
         +List~str~ gaps
+        +float confidence
+        +int reasoning_iterations
     }
     
     class ProposalEvaluation {
@@ -818,6 +861,8 @@ classDiagram
         +str supplier_site
         +str response_id
         +str evaluation_date
+        +bool is_qualified_proposal
+        +str disqualification_reason
         +float total_score
         +float score_percentage
         +str grade
@@ -828,6 +873,7 @@ classDiagram
         +List~str~ overall_weaknesses
         +List~str~ recommendations
         +str risk_assessment
+        +float overall_confidence
     }
     
     class VendorRanking {
@@ -867,6 +913,9 @@ classDiagram
         +AzureDocumentIntelligenceClient di_client
         +__init__(service: ExtractionService)
         +process_document(file_bytes, filename) str
+        +requires_ai_extraction(filename)$ bool
+        +TEXT_EXTENSIONS$ tuple
+        +AI_EXTRACTED_EXTENSIONS$ tuple
     }
     
     class CriteriaExtractionAgent {

@@ -254,10 +254,6 @@ module rfpAnalyzer 'br/public:avm/res/app/container-app:0.22.0' = {
             value: modelName
           }
           {
-            name: 'AZURE_OPENAI_RESPONSES_DEPLOYMENT_NAME'
-            value: modelName
-          }
-          {
             name: 'OTEL_LOGGING_ENABLED'
             value: 'true'
           }

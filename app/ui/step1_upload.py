@@ -43,7 +43,7 @@ def render_step1():
                     "name": rfp_file.name
                 }
 
-            if st.session_state.rfp_file:
+        if st.session_state.rfp_file:
             st.success(f"✅ RFP ready: {st.session_state.rfp_file['name']}")
 
     with col2:

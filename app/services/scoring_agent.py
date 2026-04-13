@@ -156,7 +156,8 @@ class ProposalEvaluation(BaseModel):
 
 
 # Confidence threshold below which re-reasoning is triggered.
-CONFIDENCE_THRESHOLD = 0.7
+# Configurable via the CONFIDENCE_THRESHOLD environment variable.
+CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.7"))
 
 
 # ============================================================================
