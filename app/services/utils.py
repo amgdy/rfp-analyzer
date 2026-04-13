@@ -157,6 +157,9 @@ def extract_docx_as_markdown(file_bytes: bytes) -> str:
     """
     from docx import Document  # python-docx
 
+    _MIN_HEADING_LEVEL = 1
+    _MAX_HEADING_LEVEL = 6
+
     doc = Document(io.BytesIO(file_bytes))
     parts: list[str] = []
 
@@ -176,8 +179,8 @@ def extract_docx_as_markdown(file_bytes: bytes) -> str:
                         try:
                             level = int(style_name.split()[-1])
                         except (ValueError, IndexError):
-                            level = 1
-                        level = max(1, min(level, 6))
+                            level = _MIN_HEADING_LEVEL
+                        level = max(_MIN_HEADING_LEVEL, min(level, _MAX_HEADING_LEVEL))
                         parts.append(f"\n{'#' * level} {text}\n")
                     else:
                         parts.append(text)

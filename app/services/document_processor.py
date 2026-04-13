@@ -36,6 +36,10 @@ class ExtractionService(str, Enum):
     DOCUMENT_INTELLIGENCE = "document_intelligence"
 
 
+# Extensions that need local extraction because DI does not support them.
+_DOCX_EXTENSIONS = ("docx", "doc")
+
+
 class DocumentProcessor:
     """
     Document processor using Azure AI Services.
@@ -155,7 +159,7 @@ class DocumentProcessor:
         # Document Intelligence is selected (DI does not accept DOCX).
         # Content Understanding supports DOCX natively, so no conversion
         # is needed on that path.
-        if extension in ("docx", "doc") and self.service == ExtractionService.DOCUMENT_INTELLIGENCE:
+        if extension in _DOCX_EXTENSIONS and self.service == ExtractionService.DOCUMENT_INTELLIGENCE:
             logger.info(
                 "[REQ:%s] Converting DOCX to markdown locally (DI does not support DOCX)...",
                 request_id,
