@@ -176,8 +176,8 @@ def check_document_protection(file_bytes: bytes, filename: str) -> None:
         try:
             import msoffcrypto
 
-            f = io.BytesIO(file_bytes)
-            office_file = msoffcrypto.OfficeFile(f)
+            docx_stream = io.BytesIO(file_bytes)
+            office_file = msoffcrypto.OfficeFile(docx_stream)
             if office_file.is_encrypted():
                 raise ValueError(_PROTECTION_MSG)
         except ValueError:
