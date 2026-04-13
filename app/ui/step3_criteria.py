@@ -60,13 +60,13 @@ def render_step3():
             data=criteria_json,
             file_name="extracted_scoring_criteria.json",
             mime="application/json",
-            width="stretch",
+            use_container_width=True,
         )
 
         if st.button(
             "Continue to Step 4: Score Proposals →",
             type="primary",
-            width="stretch",
+            use_container_width=True,
             disabled=st.session_state.is_processing,
         ):
             logger.info("User proceeding to Step 4 - Scoring")
@@ -87,7 +87,7 @@ def render_step3():
         if st.button(
             "🔍 Extract Evaluation Criteria",
             type="primary",
-            width="stretch",
+            use_container_width=True,
             disabled=st.session_state.is_processing,
         ):
             logger.info("User starting criteria extraction")

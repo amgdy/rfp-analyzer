@@ -126,7 +126,7 @@ def render_step1():
         if st.button(
             "Continue to Step 2: Extract Content →",
             type="primary",
-            width="stretch",
+            use_container_width=True,
             disabled=st.session_state.is_processing
         ):
             logger.info("User proceeding to Step 2 - RFP: %s, Proposals: %d",

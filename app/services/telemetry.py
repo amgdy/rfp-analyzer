@@ -175,7 +175,7 @@ def get_tracer(name: str = __name__):
     """
     try:
         from opentelemetry import trace
-        return trace.get_tracer(name, tracer_provider=trace.get_tracer_provider())
+        return trace.get_tracer(name)
     except ImportError:
         return _NoOpTracer()
 
