@@ -21,7 +21,7 @@ from .content_understanding_client import AzureContentUnderstandingClient
 from .document_intelligence_client import AzureDocumentIntelligenceClient
 from .logging_config import get_logger
 from .token_utils import estimate_token_count
-from .utils import clean_extracted_markdown, extract_docx_as_markdown
+from .utils import clean_extracted_markdown, extract_docx_as_markdown, check_document_protection
 
 load_dotenv()
 
@@ -176,6 +176,12 @@ class DocumentProcessor:
                 len(content),
             )
             return content
+
+        # ── Protection / encryption check ──────────────────────────────────
+        # Detect password-protected or IRM-protected PDFs and DOCX files
+        # *before* sending them to an extraction service.  This gives the
+        # user a clear, actionable error instead of a cryptic API failure.
+        check_document_protection(file_bytes, filename)
 
         # Handle DOCX files locally using python-docx when
         # Document Intelligence is selected (DI does not accept DOCX).

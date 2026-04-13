@@ -136,6 +136,58 @@ def clean_extracted_text(text: str) -> str:
     return cleaned
 
 
+def check_document_protection(file_bytes: bytes, filename: str) -> None:
+    """Check whether a document is encrypted or IRM-protected.
+
+    Inspects PDF and DOCX files *before* sending them to an extraction
+    service so the user gets a clear, actionable error message instead
+    of a cryptic API failure.
+
+    Args:
+        file_bytes: Raw document content.
+        filename: Original filename (used to determine format).
+
+    Raises:
+        ValueError: If the document is encrypted / IRM-protected.
+    """
+    extension = filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
+
+    _PROTECTION_MSG = (
+        "This document appears to be protected (encrypted or IRM-protected). "
+        "Please remove the protection in the original application and upload "
+        "the file again."
+    )
+
+    if extension == "pdf":
+        try:
+            from pypdf import PdfReader
+
+            reader = PdfReader(io.BytesIO(file_bytes))
+            if reader.is_encrypted:
+                raise ValueError(_PROTECTION_MSG)
+        except ValueError:
+            raise  # re-raise our own ValueError
+        except Exception:
+            # If pypdf cannot parse the file at all we let the downstream
+            # extraction service report the real error.
+            pass
+
+    elif extension == "docx":
+        try:
+            import msoffcrypto
+
+            f = io.BytesIO(file_bytes)
+            office_file = msoffcrypto.OfficeFile(f)
+            if office_file.is_encrypted():
+                raise ValueError(_PROTECTION_MSG)
+        except ValueError:
+            raise  # re-raise our own ValueError
+        except Exception:
+            # Not a valid OLE/OOXML container — let the downstream
+            # handler report the real error.
+            pass
+
+
 def extract_docx_as_markdown(file_bytes: bytes) -> str:
     """Extract content from a DOCX file as markdown text.
 

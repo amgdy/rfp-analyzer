@@ -1,9 +1,16 @@
 """Tests for services.utils module."""
 
+import io
 import json
 import pytest
 
-from services.utils import parse_json_response, format_duration, clean_extracted_text, clean_extracted_markdown
+from services.utils import (
+    parse_json_response,
+    format_duration,
+    clean_extracted_text,
+    clean_extracted_markdown,
+    check_document_protection,
+)
 
 
 # ============================================================================
@@ -389,3 +396,105 @@ class TestExtractDocxAsMarkdown:
         ole2_header = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\x00" * 100
         with pytest.raises(ValueError, match="not a valid DOCX"):
             extract_docx_as_markdown(ole2_header)
+
+
+# ============================================================================
+# check_document_protection tests
+# ============================================================================
+
+
+class TestCheckDocumentProtection:
+    """Tests for the check_document_protection helper."""
+
+    # ── PDF tests ───────────────────────────────────────────────────────
+
+    def test_unprotected_pdf_passes(self):
+        """A minimal valid, unprotected PDF should not raise."""
+        # Minimal valid PDF that pypdf can parse
+        pdf_bytes = (
+            b"%PDF-1.0\n"
+            b"1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
+            b"2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n"
+            b"3 0 obj<</Type/Page/MediaBox[0 0 612 792]/Parent 2 0 R>>endobj\n"
+            b"xref\n0 4\n"
+            b"0000000000 65535 f \n"
+            b"0000000009 00000 n \n"
+            b"0000000058 00000 n \n"
+            b"0000000115 00000 n \n"
+            b"trailer<</Size 4/Root 1 0 R>>\n"
+            b"startxref\n183\n%%EOF"
+        )
+        # Should not raise
+        check_document_protection(pdf_bytes, "test.pdf")
+
+    def test_encrypted_pdf_raises(self):
+        """A password-encrypted PDF should raise ValueError."""
+        from pypdf import PdfWriter
+
+        writer = PdfWriter()
+        writer.add_blank_page(width=612, height=792)
+        writer.encrypt("secret")
+
+        buf = io.BytesIO()
+        writer.write(buf)
+        encrypted_pdf = buf.getvalue()
+
+        with pytest.raises(ValueError, match="protected"):
+            check_document_protection(encrypted_pdf, "protected.pdf")
+
+    def test_non_pdf_bytes_no_error(self):
+        """Garbage bytes with a .pdf extension should not raise from the check."""
+        # pypdf will fail to parse — we let downstream handle it
+        check_document_protection(b"not a pdf", "bad.pdf")
+
+    # ── DOCX tests ──────────────────────────────────────────────────────
+
+    def test_unprotected_docx_passes(self):
+        """A normal DOCX file should not raise."""
+        from docx import Document as DocxDocument
+
+        doc = DocxDocument()
+        doc.add_paragraph("Hello")
+        buf = io.BytesIO()
+        doc.save(buf)
+
+        check_document_protection(buf.getvalue(), "normal.docx")
+
+    def test_encrypted_docx_raises(self):
+        """An encrypted DOCX (OLE container with EncryptionInfo) should raise."""
+        import msoffcrypto
+        from docx import Document as DocxDocument
+
+        # Create a normal DOCX
+        doc = DocxDocument()
+        doc.add_paragraph("Confidential")
+        plain_buf = io.BytesIO()
+        doc.save(plain_buf)
+        plain_buf.seek(0)
+
+        # Encrypt it
+        encrypted_buf = io.BytesIO()
+        office_file = msoffcrypto.OfficeFile(plain_buf)
+        office_file.load_key(password="secret")
+        office_file.encrypt("secret", encrypted_buf)
+
+        with pytest.raises(ValueError, match="protected"):
+            check_document_protection(encrypted_buf.getvalue(), "encrypted.docx")
+
+    def test_non_docx_bytes_no_error(self):
+        """Garbage bytes with a .docx extension should not raise from the check."""
+        check_document_protection(b"not a docx", "bad.docx")
+
+    # ── Other formats (no-op) ───────────────────────────────────────────
+
+    def test_txt_file_skipped(self):
+        """TXT files should not be checked."""
+        check_document_protection(b"hello world", "notes.txt")
+
+    def test_md_file_skipped(self):
+        """Markdown files should not be checked."""
+        check_document_protection(b"# heading", "readme.md")
+
+    def test_unknown_extension_skipped(self):
+        """Unknown extensions should not be checked."""
+        check_document_protection(b"\x00\x01\x02", "data.xyz")

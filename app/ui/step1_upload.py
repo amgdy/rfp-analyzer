@@ -96,6 +96,11 @@ def render_step1():
             "| **TXT** | Read directly — no extraction needed | Instant |\n"
             "| **MD** | Read directly — no extraction needed | Instant |"
         )
+        st.info(
+            "🔒 **Protected documents are not supported.** If your PDF or DOCX is "
+            "password-protected or IRM-protected, please remove the protection "
+            "before uploading."
+        )
 
     st.markdown("---")
 
