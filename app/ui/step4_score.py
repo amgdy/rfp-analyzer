@@ -440,6 +440,39 @@ def _build_criterion_score_map(eval_result: dict) -> dict:
     }
 
 
+# Vendor color palette — visually distinct, colour-blind friendly.
+# Each vendor gets a fixed colour across every chart.
+_VENDOR_PALETTE = [
+    "#4F46E5",  # indigo
+    "#E11D48",  # rose
+    "#059669",  # emerald
+    "#D97706",  # amber
+    "#7C3AED",  # violet
+    "#0891B2",  # cyan
+    "#DC2626",  # red
+    "#2563EB",  # blue
+    "#65A30D",  # lime
+    "#DB2777",  # pink
+    "#0D9488",  # teal
+    "#EA580C",  # orange
+]
+
+
+def _build_vendor_color_map(evaluations: list) -> dict[str, str]:
+    """Return a deterministic vendor-name → hex-colour mapping.
+
+    Vendors are sorted alphabetically so the same set always gets the same
+    colours regardless of evaluation order.
+    """
+    vendor_names = sorted({
+        e.get("supplier_name", "Unknown") for e in evaluations
+    })
+    return {
+        name: _VENDOR_PALETTE[i % len(_VENDOR_PALETTE)]
+        for i, name in enumerate(vendor_names)
+    }
+
+
 def render_metrics_dashboard(comparison: dict, evaluations: list):
     """Render the metrics dashboard with charts for each criterion."""
     st.subheader("📊 Metrics Dashboard")
@@ -463,9 +496,12 @@ def render_metrics_dashboard(comparison: dict, evaluations: list):
         st.warning("No criteria scores available.")
         return
 
+    # Build a single vendor→colour map shared by every chart
+    vendor_color_map = _build_vendor_color_map(evaluations)
+
     # Overall vendor comparison bar chart (total scores)
     st.markdown("### 🏆 Overall Vendor Performance")
-    _render_overall_comparison_bar(evaluations)
+    _render_overall_comparison_bar(evaluations, vendor_color_map)
 
     st.markdown("---")
     st.markdown("### 📈 Performance by Criterion")
@@ -490,7 +526,7 @@ def render_metrics_dashboard(comparison: dict, evaluations: list):
             criterion_weight = criterion.get("weight", 0)
 
             with cols[j]:
-                _render_criterion_bar_chart(evaluations, criterion_id, criterion_name, criterion_weight)
+                _render_criterion_bar_chart(evaluations, criterion_id, criterion_name, criterion_weight, vendor_color_map)
 
     # Vendor recommendation section
     st.markdown("---")
@@ -498,8 +534,8 @@ def render_metrics_dashboard(comparison: dict, evaluations: list):
     _render_criterion_recommendations(comparison, evaluations)
 
 
-def _render_overall_comparison_bar(evaluations: list):
-    """Render bar chart showing overall vendor comparison."""
+def _render_overall_comparison_bar(evaluations: list, vendor_color_map: dict[str, str]):
+    """Render bar chart showing overall vendor comparison with consistent vendor colours."""
     vendor_names = []
     total_scores = []
     grades = []
@@ -516,37 +552,39 @@ def _render_overall_comparison_bar(evaluations: list):
     sorted_data = sorted(zip(vendor_names, total_scores, grades), key=lambda x: x[1], reverse=True)
     vendor_names, total_scores, grades = zip(*sorted_data) if sorted_data else ([], [], [])
 
-    # Create bar chart
-    fig = px.bar(
+    # Assign consistent colours per vendor
+    bar_colors = [vendor_color_map.get(v, "#4F46E5") for v in vendor_names]
+
+    fig = go.Figure(go.Bar(
         x=list(vendor_names),
         y=list(total_scores),
-        title="Total Score Comparison",
-        labels={"x": "Vendor", "y": "Total Score"},
-        color=list(total_scores),
-        color_continuous_scale="RdYlGn",
-        text=[f"{s:.1f} ({g})" for s, g in zip(total_scores, grades)]
-    )
-
-    fig.update_traces(
+        marker_color=bar_colors,
+        text=[f"{s:.1f} ({g})" for s, g in zip(total_scores, grades)],
         textposition='outside',
-        hovertemplate="<b>%{x}</b><br>Score: %{y:.1f}<extra></extra>"
-    )
+        hovertemplate="<b>%{x}</b><br>Score: %{y:.1f}<extra></extra>",
+    ))
 
     fig.update_layout(
+        title="Total Score Comparison",
         showlegend=False,
         xaxis_title="Vendor",
         yaxis_title="Total Score",
         yaxis_range=[0, 105],
         margin=dict(t=50, b=50, l=50, r=20),
         height=400,
-        coloraxis_showscale=False
     )
 
     st.plotly_chart(fig, width="stretch")
 
 
-def _render_criterion_bar_chart(evaluations: list, criterion_id: str, criterion_name: str, weight: float):
-    """Render a bar chart for a specific criterion showing vendor scores.
+def _render_criterion_bar_chart(
+    evaluations: list,
+    criterion_id: str,
+    criterion_name: str,
+    weight: float,
+    vendor_color_map: dict[str, str],
+):
+    """Render a bar chart for a specific criterion with consistent vendor colours.
 
     Looks up scores by ``criterion_id`` so results match text exactly.
     """
@@ -566,35 +604,29 @@ def _render_criterion_bar_chart(evaluations: list, criterion_id: str, criterion_
     sorted_data = sorted(zip(vendor_names, scores), key=lambda x: x[1], reverse=True)
     vendor_names, scores = zip(*sorted_data) if sorted_data else ([], [])
 
-    # Find best vendor for this criterion
     best_vendor = vendor_names[0] if vendor_names else "N/A"
     best_score = scores[0] if scores else 0
 
-    # Create bar chart
-    fig = px.bar(
+    bar_colors = [vendor_color_map.get(v, "#4F46E5") for v in vendor_names]
+
+    fig = go.Figure(go.Bar(
         x=list(vendor_names),
         y=list(scores),
-        title=f"{criterion_name}<br><sup>Weight: {weight:.1f}% | Best: {best_vendor} ({best_score:.1f})</sup>",
-        labels={"x": "Vendor", "y": "Score"},
-        color=list(scores),
-        color_continuous_scale="RdYlGn",
-        text=[f"{s:.1f}" for s in scores]
-    )
-
-    fig.update_traces(
+        marker_color=bar_colors,
+        text=[f"{s:.1f}" for s in scores],
         textposition='outside',
-        hovertemplate="<b>%{x}</b><br>Score: %{y:.1f}/100<extra></extra>"
-    )
+        hovertemplate="<b>%{x}</b><br>Score: %{y:.1f}/100<extra></extra>",
+    ))
 
     fig.update_layout(
+        title=f"{criterion_name}<br><sup>Weight: {weight:.1f}% | Best: {best_vendor} ({best_score:.1f})</sup>",
         showlegend=False,
         xaxis_title="",
         yaxis_title="Score",
         yaxis_range=[0, 105],
         margin=dict(t=60, b=30, l=40, r=10),
         height=300,
-        coloraxis_showscale=False,
-        xaxis_tickangle=-45 if len(vendor_names) > 3 else 0
+        xaxis_tickangle=-45 if len(vendor_names) > 3 else 0,
     )
 
     st.plotly_chart(fig, width="stretch", key=f"bar_{criterion_id}")
