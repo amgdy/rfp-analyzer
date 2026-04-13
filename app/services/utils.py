@@ -1,5 +1,6 @@
 """Shared utilities for RFP Analyzer services."""
 
+import io
 import json
 import re
 from typing import Any
@@ -133,3 +134,85 @@ def clean_extracted_text(text: str) -> str:
     cleaned = cleaned.strip()
 
     return cleaned
+
+
+def extract_docx_as_markdown(file_bytes: bytes) -> str:
+    """Extract content from a DOCX file as markdown text.
+
+    Uses ``python-docx`` to read paragraphs and tables and produces a
+    markdown representation suitable for downstream AI processing.
+
+    Azure Document Intelligence does not natively support ``.docx`` files,
+    so this function is used as a local extraction fallback.
+
+    Args:
+        file_bytes: The DOCX document content as bytes
+
+    Returns:
+        Extracted content as a markdown string
+
+    Raises:
+        ImportError: If ``python-docx`` is not installed
+        Exception: If the file cannot be parsed as a valid DOCX
+    """
+    from docx import Document  # python-docx
+
+    doc = Document(io.BytesIO(file_bytes))
+    parts: list[str] = []
+
+    for element in doc.element.body:
+        tag = element.tag.split("}")[-1]  # strip namespace
+
+        if tag == "p":
+            # Paragraph — check if it has a heading style
+            for para in doc.paragraphs:
+                if para._element is element:
+                    text = para.text.strip()
+                    if not text:
+                        break
+                    style_name = (para.style.name or "").lower() if para.style else ""
+                    if style_name.startswith("heading"):
+                        # Map heading level: "Heading 1" → "#", "Heading 2" → "##", etc.
+                        try:
+                            level = int(style_name.split()[-1])
+                        except (ValueError, IndexError):
+                            level = 1
+                        level = max(1, min(level, 6))
+                        parts.append(f"\n{'#' * level} {text}\n")
+                    else:
+                        parts.append(text)
+                    break
+
+        elif tag == "tbl":
+            # Table — render as markdown table
+            for table in doc.tables:
+                if table._element is element:
+                    _render_table(table, parts)
+                    break
+
+    return clean_extracted_markdown("\n\n".join(parts))
+
+
+def _render_table(table, parts: list[str]) -> None:
+    """Render a python-docx Table as a markdown table into *parts*."""
+    rows = table.rows
+    if not rows:
+        return
+
+    # Build rows of cell text
+    md_rows: list[list[str]] = []
+    for row in rows:
+        md_rows.append([cell.text.strip().replace("\n", " ") for cell in row.cells])
+
+    if not md_rows:
+        return
+
+    # Header row
+    header = "| " + " | ".join(md_rows[0]) + " |"
+    separator = "| " + " | ".join("---" for _ in md_rows[0]) + " |"
+    body_lines = [
+        "| " + " | ".join(r) + " |"
+        for r in md_rows[1:]
+    ]
+
+    parts.append("\n".join([header, separator, *body_lines]))

@@ -259,3 +259,124 @@ class TestCleanExtractedMarkdown:
         assert "# Header" in result
         assert "**bold**" in result
         assert "| col1 | col2 |" in result
+
+
+# ============================================================================
+# extract_docx_as_markdown tests
+# ============================================================================
+
+
+class TestExtractDocxAsMarkdown:
+    """Tests for the extract_docx_as_markdown helper."""
+
+    @staticmethod
+    def _make_docx(paragraphs=None, tables=None):
+        """Build a minimal DOCX in memory and return its bytes.
+
+        Args:
+            paragraphs: list of (text, style_name) tuples.
+                        style_name can be "Normal", "Heading 1", etc.
+            tables: list of row-lists, e.g. [["H1","H2"],["a","b"]]
+        """
+        from docx import Document
+        import io
+
+        doc = Document()
+
+        if paragraphs:
+            for text, style in paragraphs:
+                doc.add_paragraph(text, style=style)
+
+        if tables:
+            rows = len(tables)
+            cols = len(tables[0]) if tables else 0
+            tbl = doc.add_table(rows=rows, cols=cols)
+            for r_idx, row_data in enumerate(tables):
+                for c_idx, cell_text in enumerate(row_data):
+                    tbl.rows[r_idx].cells[c_idx].text = cell_text
+
+        buf = io.BytesIO()
+        doc.save(buf)
+        return buf.getvalue()
+
+    def test_basic_paragraphs(self):
+        """Extract plain paragraphs as markdown text."""
+        from services.utils import extract_docx_as_markdown
+
+        docx_bytes = self._make_docx(
+            paragraphs=[
+                ("Hello World", "Normal"),
+                ("Second paragraph", "Normal"),
+            ]
+        )
+        result = extract_docx_as_markdown(docx_bytes)
+        assert "Hello World" in result
+        assert "Second paragraph" in result
+
+    def test_heading_extraction(self):
+        """Headings should become markdown headers."""
+        from services.utils import extract_docx_as_markdown
+
+        docx_bytes = self._make_docx(
+            paragraphs=[
+                ("Main Title", "Heading 1"),
+                ("Sub Section", "Heading 2"),
+                ("Body text", "Normal"),
+            ]
+        )
+        result = extract_docx_as_markdown(docx_bytes)
+        assert "# Main Title" in result
+        assert "## Sub Section" in result
+        assert "Body text" in result
+
+    def test_table_extraction(self):
+        """Tables should become markdown tables."""
+        from services.utils import extract_docx_as_markdown
+
+        docx_bytes = self._make_docx(
+            tables=[
+                ["Name", "Score"],
+                ["Vendor A", "85"],
+                ["Vendor B", "72"],
+            ]
+        )
+        result = extract_docx_as_markdown(docx_bytes)
+        assert "| Name | Score |" in result
+        assert "| --- | --- |" in result
+        assert "| Vendor A | 85 |" in result
+        assert "| Vendor B | 72 |" in result
+
+    def test_empty_document(self):
+        """An empty DOCX should return an empty string."""
+        from services.utils import extract_docx_as_markdown
+
+        docx_bytes = self._make_docx()
+        result = extract_docx_as_markdown(docx_bytes)
+        assert result == ""
+
+    def test_mixed_content(self):
+        """A DOCX with headings, paragraphs, and tables."""
+        from services.utils import extract_docx_as_markdown
+
+        docx_bytes = self._make_docx(
+            paragraphs=[
+                ("Report Title", "Heading 1"),
+                ("This is the intro.", "Normal"),
+            ],
+            tables=[
+                ["Criterion", "Weight"],
+                ["Cost", "30%"],
+            ],
+        )
+        result = extract_docx_as_markdown(docx_bytes)
+        assert "# Report Title" in result
+        assert "This is the intro." in result
+        assert "| Criterion | Weight |" in result
+        assert "| Cost | 30% |" in result
+
+    def test_invalid_bytes_raises(self):
+        """Non-DOCX bytes should raise an exception."""
+        from services.utils import extract_docx_as_markdown
+
+        with pytest.raises(Exception):
+            extract_docx_as_markdown(b"not a docx file")

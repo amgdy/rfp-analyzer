@@ -21,7 +21,7 @@ from .content_understanding_client import AzureContentUnderstandingClient
 from .document_intelligence_client import AzureDocumentIntelligenceClient
 from .logging_config import get_logger
 from .token_utils import estimate_token_count
-from .utils import clean_extracted_markdown
+from .utils import clean_extracted_markdown, extract_docx_as_markdown
 
 load_dotenv()
 
@@ -148,6 +148,27 @@ class DocumentProcessor:
                 request_id,
                 duration,
                 len(content),
+            )
+            return content
+
+        # Handle DOCX/DOC files locally using python-docx when
+        # Document Intelligence is selected (DI does not accept DOCX).
+        # Content Understanding supports DOCX natively, so no conversion
+        # is needed on that path.
+        if extension in ("docx", "doc") and self.service == ExtractionService.DOCUMENT_INTELLIGENCE:
+            logger.info(
+                "[REQ:%s] Converting DOCX to markdown locally (DI does not support DOCX)...",
+                request_id,
+            )
+            content = await asyncio.to_thread(extract_docx_as_markdown, file_bytes)
+            duration = time.time() - extract_start
+            content_tokens = estimate_token_count(content)
+            logger.info(
+                "[REQ:%s] ✅ DOCX extraction completed in %.3fs (%d chars, ~%d tokens)",
+                request_id,
+                duration,
+                len(content),
+                content_tokens,
             )
             return content
 
