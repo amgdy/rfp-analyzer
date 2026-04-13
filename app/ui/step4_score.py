@@ -440,8 +440,8 @@ def _build_criterion_score_map(eval_result: dict) -> dict:
     }
 
 
-# Vendor color palette — visually distinct, colour-blind friendly.
-# Each vendor gets a fixed colour across every chart.
+# Vendor color palette — visually distinct, color-blind friendly.
+# Each vendor gets a fixed color across every chart.
 _VENDOR_PALETTE = [
     "#4F46E5",  # indigo
     "#E11D48",  # rose
@@ -459,10 +459,10 @@ _VENDOR_PALETTE = [
 
 
 def _build_vendor_color_map(evaluations: list) -> dict[str, str]:
-    """Return a deterministic vendor-name → hex-colour mapping.
+    """Return a deterministic vendor-name → hex-color mapping.
 
     Vendors are sorted alphabetically so the same set always gets the same
-    colours regardless of evaluation order.
+    colors regardless of evaluation order.
     """
     vendor_names = sorted({
         e.get("supplier_name", "Unknown") for e in evaluations
@@ -496,7 +496,7 @@ def render_metrics_dashboard(comparison: dict, evaluations: list):
         st.warning("No criteria scores available.")
         return
 
-    # Build a single vendor→colour map shared by every chart
+    # Build a single vendor→color map shared by every chart
     vendor_color_map = _build_vendor_color_map(evaluations)
 
     # Overall vendor comparison bar chart (total scores)
@@ -535,7 +535,7 @@ def render_metrics_dashboard(comparison: dict, evaluations: list):
 
 
 def _render_overall_comparison_bar(evaluations: list, vendor_color_map: dict[str, str]):
-    """Render bar chart showing overall vendor comparison with consistent vendor colours."""
+    """Render bar chart showing overall vendor comparison with consistent vendor colors."""
     vendor_names = []
     total_scores = []
     grades = []
@@ -552,7 +552,7 @@ def _render_overall_comparison_bar(evaluations: list, vendor_color_map: dict[str
     sorted_data = sorted(zip(vendor_names, total_scores, grades), key=lambda x: x[1], reverse=True)
     vendor_names, total_scores, grades = zip(*sorted_data) if sorted_data else ([], [], [])
 
-    # Assign consistent colours per vendor
+    # Assign consistent colors per vendor
     bar_colors = [vendor_color_map.get(v, "#4F46E5") for v in vendor_names]
 
     fig = go.Figure(go.Bar(
@@ -584,7 +584,7 @@ def _render_criterion_bar_chart(
     weight: float,
     vendor_color_map: dict[str, str],
 ):
-    """Render a bar chart for a specific criterion with consistent vendor colours.
+    """Render a bar chart for a specific criterion with consistent vendor colors.
 
     Looks up scores by ``criterion_id`` so results match text exactly.
     """
