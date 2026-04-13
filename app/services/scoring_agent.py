@@ -58,6 +58,10 @@ class ScoringCriterion(BaseModel):
     evaluation_guidance: str = Field(
         description="Guidance on how to evaluate this criterion"
     )
+    confidence: float = Field(
+        default=0.8,
+        description="Confidence score 0.0-1.0 for extracting this criterion",
+    )
 
 
 class ExtractedCriteria(BaseModel):
@@ -70,6 +74,10 @@ class ExtractedCriteria(BaseModel):
     )
     criteria: list[ScoringCriterion] = Field(description="List of scoring criteria")
     extraction_notes: str = Field(description="Notes about the extraction process")
+    overall_confidence: float = Field(
+        default=0.8,
+        description="Average confidence across all extracted criteria",
+    )
 
 
 class CriterionScore(BaseModel):
@@ -89,6 +97,14 @@ class CriterionScore(BaseModel):
     strengths: list[str] = Field(description="Specific strengths for this criterion")
     gaps: list[str] = Field(
         description="Specific gaps or weaknesses for this criterion"
+    )
+    confidence: float = Field(
+        default=0.8,
+        description="Confidence score 0.0-1.0 for this scoring assessment",
+    )
+    reasoning_iterations: int = Field(
+        default=1,
+        description="Number of reasoning attempts used to reach this score",
     )
 
 
@@ -133,6 +149,14 @@ class ProposalEvaluation(BaseModel):
     )
     recommendations: list[str] = Field(description="Actionable recommendations")
     risk_assessment: str = Field(description="Assessment of risks with this vendor")
+    overall_confidence: float = Field(
+        default=0.8,
+        description="Average confidence across all criterion scores",
+    )
+
+
+# Confidence threshold below which re-reasoning is triggered.
+CONFIDENCE_THRESHOLD = 0.7
 
 
 # ============================================================================
@@ -188,6 +212,7 @@ You MUST respond with a valid JSON object matching this exact structure:
   "rfp_title": "Extracted RFP title",
   "rfp_summary": "2-3 sentence summary of what the RFP is requesting",
   "total_weight": 100.0,
+  "overall_confidence": <0.0-1.0>,
   "criteria": [
     {
       "criterion_id": "C-1",
@@ -196,11 +221,23 @@ You MUST respond with a valid JSON object matching this exact structure:
       "category": "Technical|Financial|Experience|Qualitative",
       "weight": <percentage weight>,
       "max_score": 100,
-      "evaluation_guidance": "Detailed guidance on how to score this criterion"
+      "evaluation_guidance": "Detailed guidance on how to score this criterion",
+      "confidence": <0.0-1.0>
     }
   ],
   "extraction_notes": "Notes about how criteria were identified and weighted"
 }
+```
+
+## CONFIDENCE SCORING GUIDELINES:
+
+For each criterion, assign a confidence score:
+- **0.9–1.0**: Criterion is explicitly stated in the RFP with clear weight/priority
+- **0.7–0.89**: Criterion is strongly implied by the RFP text
+- **0.5–0.69**: Criterion is inferred from context or industry standards
+- **Below 0.5**: Low confidence — criterion may not be applicable
+
+The `overall_confidence` should be the average of all individual criterion confidences.
 ```
 
 ## IMPORTANT:
@@ -543,6 +580,16 @@ Respond with ONLY valid JSON matching the schema in your instructions."""
                     ) * 100
                 data["total_weight"] = 100.0
 
+            # Ensure confidence fields are present with defaults
+            for criterion in criteria:
+                criterion.setdefault("confidence", 0.8)
+            if criteria:
+                data["overall_confidence"] = sum(
+                    c.get("confidence", 0.8) for c in criteria
+                ) / len(criteria)
+            else:
+                data.setdefault("overall_confidence", 0.8)
+
             return data
 
         except json.JSONDecodeError as e:
@@ -554,6 +601,7 @@ Respond with ONLY valid JSON matching the schema in your instructions."""
                 "total_weight": 100.0,
                 "criteria": [],
                 "extraction_notes": f"Error parsing response: {str(e)}",
+                "overall_confidence": 0.0,
             }
 
 
@@ -621,6 +669,7 @@ You MUST respond with a valid JSON object:
   "score_percentage": <total_score as percentage>,
   "grade": "A/B/C/D/F",
   "recommendation": "Clear recommendation statement",
+  "overall_confidence": <0.0-1.0>,
   "criterion_scores": [
     {{
       "criterion_id": "C-1",
@@ -631,7 +680,8 @@ You MUST respond with a valid JSON object:
       "evidence": "Specific evidence from proposal",
       "justification": "Detailed scoring justification",
       "strengths": ["strength1", "strength2"],
-      "gaps": ["gap1", "gap2"]
+      "gaps": ["gap1", "gap2"],
+      "confidence": <0.0-1.0>
     }}
   ],
   "executive_summary": "2-3 paragraph executive summary",
@@ -641,6 +691,16 @@ You MUST respond with a valid JSON object:
   "risk_assessment": "Assessment of risks with this vendor"
 }}
 ```
+
+## CONFIDENCE SCORING GUIDELINES:
+
+For each criterion score, assign a confidence value:
+- **0.9–1.0**: Strong evidence found in the proposal, score is well-supported
+- **0.7–0.89**: Moderate evidence, score is reasonably supported
+- **0.5–0.69**: Limited evidence, score may be imprecise
+- **Below 0.5**: Insufficient evidence to score accurately
+
+The `overall_confidence` should be the average of all individual criterion score confidences.
 
 ## IMPORTANT:
 - **FIRST**, determine if the document is a genuine vendor proposal responding to the RFP.
@@ -1079,6 +1139,17 @@ Respond with ONLY valid JSON matching the schema in your instructions."""
             else:
                 data["grade"] = "F"
 
+            # Ensure confidence fields are present with defaults
+            for cs in criterion_scores:
+                cs.setdefault("confidence", 0.8)
+                cs.setdefault("reasoning_iterations", 1)
+            if criterion_scores:
+                data["overall_confidence"] = sum(
+                    cs.get("confidence", 0.8) for cs in criterion_scores
+                ) / len(criterion_scores)
+            else:
+                data.setdefault("overall_confidence", 0.8)
+
             return data
 
         except json.JSONDecodeError as e:
@@ -1102,6 +1173,7 @@ Respond with ONLY valid JSON matching the schema in your instructions."""
                 "overall_weaknesses": [],
                 "recommendations": [],
                 "risk_assessment": "Unable to assess",
+                "overall_confidence": 0.0,
             }
 
 
