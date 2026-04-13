@@ -374,9 +374,18 @@ class TestExtractDocxAsMarkdown:
         assert "| Criterion | Weight |" in result
         assert "| Cost | 30% |" in result
 
-    def test_invalid_bytes_raises(self):
-        """Non-DOCX bytes should raise an exception."""
+    def test_invalid_bytes_raises_valueerror(self):
+        """Non-DOCX bytes should raise a ValueError with a helpful message."""
         from services.utils import extract_docx_as_markdown
 
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError, match="not a valid DOCX document"):
             extract_docx_as_markdown(b"not a docx file")
+
+    def test_old_doc_binary_raises_valueerror(self):
+        """An old binary .doc file (non-ZIP) should raise ValueError."""
+        from services.utils import extract_docx_as_markdown
+
+        # Old .doc files start with the OLE2 compound file magic bytes
+        ole2_header = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\x00" * 100
+        with pytest.raises(ValueError, match="not a valid DOCX"):
+            extract_docx_as_markdown(ole2_header)

@@ -37,7 +37,11 @@ class ExtractionService(str, Enum):
 
 
 # Extensions that need local extraction because DI does not support them.
-_DOCX_EXTENSIONS = ("docx", "doc")
+# Note: only .docx (Office Open XML) is supported by python-docx.
+# Old binary .doc files are NOT supported and will be sent to DI as-is
+# (DI will reject them with an InvalidContent error — users must convert
+# to .docx or .pdf first).
+_DOCX_EXTENSIONS = ("docx",)
 
 
 class DocumentProcessor:
@@ -155,7 +159,7 @@ class DocumentProcessor:
             )
             return content
 
-        # Handle DOCX/DOC files locally using python-docx when
+        # Handle DOCX files locally using python-docx when
         # Document Intelligence is selected (DI does not accept DOCX).
         # Content Understanding supports DOCX natively, so no conversion
         # is needed on that path.
@@ -164,7 +168,18 @@ class DocumentProcessor:
                 "[REQ:%s] Converting DOCX to markdown locally (DI does not support DOCX)...",
                 request_id,
             )
-            content = await asyncio.to_thread(extract_docx_as_markdown, file_bytes)
+            try:
+                content = await asyncio.to_thread(extract_docx_as_markdown, file_bytes)
+            except ValueError as exc:
+                # The file has a .docx extension but is not a valid Office
+                # Open XML document (e.g. old binary .doc renamed to .docx,
+                # corrupted archive, or non-ZIP data).
+                logger.error(
+                    "[REQ:%s] Local DOCX extraction failed: %s",
+                    request_id,
+                    exc,
+                )
+                raise ValueError(str(exc)) from exc
             duration = time.time() - extract_start
             content_tokens = estimate_token_count(content)
             logger.info(

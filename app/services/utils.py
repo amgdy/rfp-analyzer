@@ -153,14 +153,29 @@ def extract_docx_as_markdown(file_bytes: bytes) -> str:
 
     Raises:
         ImportError: If ``python-docx`` is not installed
-        Exception: If the file cannot be parsed as a valid DOCX
+        ValueError: If the file is not a valid DOCX (e.g. old binary
+            ``.doc`` format, corrupted archive, or non-ZIP data).
     """
+    import zipfile
+
     from docx import Document  # python-docx
 
     _MIN_HEADING_LEVEL = 1
     _MAX_HEADING_LEVEL = 6
 
-    doc = Document(io.BytesIO(file_bytes))
+    try:
+        doc = Document(io.BytesIO(file_bytes))
+    except zipfile.BadZipFile:
+        raise ValueError(
+            "The file is not a valid DOCX document. It may be an older "
+            "binary .doc format or a corrupted file. Please convert it "
+            "to .docx or .pdf and try again."
+        )
+    except Exception as exc:
+        raise ValueError(
+            f"Failed to parse DOCX file: {exc}. Please ensure the file "
+            "is a valid .docx document or convert it to .pdf."
+        ) from exc
     parts: list[str] = []
 
     for element in doc.element.body:
