@@ -13,10 +13,13 @@ RFP Analyzer automates the complex process of evaluating vendor proposals agains
 ### Key Capabilities
 
 - **Automated Document Processing**: Extract content from PDFs and Word documents using Azure AI; text files (TXT, MD) are read directly
+- **Document Protection Detection**: Encrypted and IRM-protected PDFs and DOCX files are detected before processing with clear, actionable error messages
 - **Intelligent Criteria Extraction**: Automatically identify evaluation criteria and weights from RFP documents with confidence scoring
 - **Confidence-Driven Re-Reasoning**: Low-confidence criteria and scores are automatically re-analyzed for improved accuracy
 - **Multi-Vendor Comparison**: Evaluate and rank multiple vendor proposals simultaneously
+- **Large Document Support**: Token-aware chunking with map-reduce for documents exceeding model context windows
 - **Comprehensive Reporting**: Generate detailed reports in Word, CSV, and JSON formats
+- **Resilient AI Pipeline**: Automatic retry with exponential backoff and AI refusal detection
 
 ## ✨ Features
 
@@ -26,6 +29,7 @@ RFP Analyzer automates the complex process of evaluating vendor proposals agains
    - Upload your RFP document (PDF, DOCX, TXT, or MD)
    - Upload multiple vendor proposals for comparison
    - AI-extracted formats (PDF, DOCX) use Azure AI services; text files (TXT, MD) are read instantly
+   - Protected (encrypted/IRM) documents are detected automatically with a clear message
 
 2. **⚙️ Extract Content**
    - Choose extraction service (Azure Content Understanding or Document Intelligence)
@@ -58,6 +62,17 @@ The evaluation system uses specialized AI agents:
 | **Criteria Extraction Agent** | Analyzes RFP to identify scoring criteria, weights, confidence scores, and evaluation guidance. Auto re-reasons on low-confidence criteria |
 | **Proposal Scoring Agent** | Evaluates each vendor proposal against extracted criteria with confidence scoring. Re-reasons on low-confidence scores |
 | **Comparison Agent** | Compares vendors, generates rankings, and provides recommendations |
+
+### Resilience & Error Handling
+
+| Feature | Description |
+|---------|-------------|
+| **Document Protection Detection** | Encrypted and IRM-protected PDFs/DOCX detected before API calls using `pypdf` and `msoffcrypto-tool` |
+| **AI Refusal Detection** | Automatic retry when models refuse to answer (7 refusal patterns detected) |
+| **Exponential Backoff** | Retry with backoff on transient API failures |
+| **Large Document Chunking** | Token-aware map-reduce splitting for documents exceeding context window |
+| **Non-Proposal Filtering** | Detects and excludes non-proposal documents from scoring |
+| **Corrupt File Handling** | DOCX files that are corrupt or renamed `.doc` files produce clear error messages |
 
 ### Export Options
 
@@ -300,7 +315,7 @@ rfp-analyzer/
 │   │   ├── retry_utils.py            # Retry and refusal detection utilities
 │   │   ├── token_utils.py            # Token estimation and context management
 │   │   ├── telemetry.py              # OpenTelemetry tracing setup
-│   │   ├── utils.py                  # Shared utilities (markdown cleanup, DOCX extraction)
+│   │   ├── utils.py                  # Shared utilities (markdown cleanup, DOCX extraction, protection detection)
 │   │   └── logging_config.py         # Centralized logging configuration
 │   └── ui/
 │       ├── step1_upload.py           # Upload with file type awareness
@@ -346,6 +361,7 @@ The application supports multiple Azure OpenAI models:
 2. Upload one or more vendor proposal documents
 3. Each document will show a preview and file size
 4. File format info shows which files use AI extraction vs direct reading
+5. Protected (encrypted/IRM) documents are detected early with a clear error message
 
 ### Step 2: Extract Content
 
@@ -418,8 +434,12 @@ uv run streamlit run main.py --server.runOnSave true
 | `azure-identity` | Azure authentication |
 | `azure-ai-documentintelligence` | Document Intelligence SDK |
 | `pydantic` | Data validation and models |
-| `python-docx` | Word document generation |
+| `python-docx` | Word document generation and DOCX extraction |
 | `plotly` | Interactive charts |
+| `pypdf` | PDF protection/encryption detection |
+| `msoffcrypto-tool` | DOCX encryption and IRM protection detection |
+| `opentelemetry-*` | Distributed tracing and observability |
+| `azure-monitor-opentelemetry` | Azure Monitor integration |
 
 
 

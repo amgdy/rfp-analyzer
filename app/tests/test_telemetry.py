@@ -39,7 +39,7 @@ class TestGetAppVersion:
 
     def test_reads_version_from_pyproject(self):
         version = _get_app_version()
-        assert version == "0.2.0"
+        assert version == "0.3.0"
 
 
 class TestSetupTelemetry:

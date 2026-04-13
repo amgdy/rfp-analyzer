@@ -5,24 +5,69 @@ All notable changes to the RFP Analyzer project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.0] - 2026-04-13
 
 ### Added
-- Comprehensive project documentation
-- Architecture diagrams and component documentation
-- CONTRIBUTING.md with development guidelines
-- SECURITY.md with security best practices
-- MIT License
+
+#### Document Protection Detection
+- **Encrypted/IRM document detection** — password-protected and IRM-protected PDFs and DOCX files are now detected *before* calling Azure extraction services, giving users a clear, actionable error message
+- Added `pypdf` dependency for PDF encryption detection via `PdfReader.is_encrypted`
+- Added `msoffcrypto-tool` dependency for DOCX encryption/IRM detection via `OfficeFile.is_encrypted()`
+- New `check_document_protection()` utility in `services/utils.py`
+- Upload UI shows an info box explaining that protected documents are not supported
+
+#### Confidence Scoring & Re-Reasoning
+- **Confidence scores (0.0–1.0)** on `ScoringCriterion`, `ExtractedCriteria`, `CriterionScore`, and `ProposalEvaluation` models
+- **Automatic re-reasoning** — when overall confidence falls below `CONFIDENCE_THRESHOLD` (default 0.7, configurable via env var), the system runs a deeper analysis pass with increased reasoning effort
+- Re-reasoning capped at one extra pass per agent to control costs
+- `reasoning_iterations` field on `CriterionScore` tracks how many passes were used
+- Confidence badges in criteria review UI (🟢 High / 🟡 Medium / 🔴 Low)
+- Confidence display in scoring results with re-reasoning progress indicators
+
+#### Document Processing Improvements
+- **Local DOCX extraction** via `python-docx` when using Document Intelligence (which does not support DOCX natively)
+- **Corrupt file handling** — renamed `.doc` files and corrupt DOCX archives produce clear `ValueError` messages instead of cryptic stack traces
+- **File type awareness** in upload and extraction UIs — PDF/DOCX flagged as AI-extracted; TXT/MD shown as instant read
+- Removed `.doc` from the upload type list (unsupported by both `python-docx` and Document Intelligence)
+
+#### Resilience & Retry Logic
+- **AI refusal detection** — 7 refusal phrase patterns (e.g. "I'm sorry, but I cannot assist") are detected by `check_for_refusal()` and automatically retried
+- **Exponential backoff** on all `agent.run()` OpenAI calls
+- **Empty response handling** — `"empty response"` added to retryable substrings for automatic retry on empty model output
+- **Token-aware large document chunking** — documents exceeding the model context window (configurable `MAX_CONTEXT_TOKENS`, default 1,050,000) are automatically split using a map-reduce pattern with heading/paragraph boundaries and overlap tokens
+
+#### Visualization & Charts
+- **Consistent vendor colors** across all dashboard charts using a 12-color deterministic palette
+- Vendors sorted alphabetically so colors are stable across sessions
+
+#### Non-Proposal Filtering
+- **Non-proposal document detection** — documents that are clearly not vendor proposals (e.g. cover letters, supplementary info) are detected and excluded from scoring with disqualification reasons shown in the report
+- **Filename fallback** — when vendor name cannot be extracted from content, falls back to the proposal filename
+
+#### Extraction Quality
+- **Cleaner markdown output** — `clean_extracted_markdown()` improves markdown from both Content Understanding and Document Intelligence
+- **Table summaries** — Document Intelligence client produces descriptive table summaries
+- **Improved figure descriptions** — figure elements include surrounding content for better AI comprehension
 
 ### Changed
-- Updated README.md with complete project information
-- Improved deployment documentation
 
-### Fixed
-- **Aspire Dashboard task**: Fixed `start-aspire-dashboard` VS Code task that failed on repeated launches due to container name conflict. The task now stops/removes any existing container before starting a new one.
-- Removed incorrect `isBackground: true` from Aspire task (docker run -d returns immediately, so it's not a background task)
-- Added OTLP/HTTP port mapping (4318→18890) for Aspire Dashboard (in addition to existing gRPC 4317→18889)
-- Stop task now handles "not running" state gracefully
+#### Infrastructure
+- Bumped version from 0.2.0 to 0.3.0
+- Updated IaC resource names to Microsoft CAF naming convention (`<abbreviation><workload>-<resourceToken>`)
+- Endpoint configuration no longer includes `/openai/` suffix (SDK adds it automatically)
+- OTEL logging auto-enables when `APPLICATIONINSIGHTS_CONNECTION_STRING` is set
+- Container App resources: 2 CPU / 4Gi (Consumption plan max)
+
+#### Dependencies
+- Added `pypdf>=5.0.0` for PDF protection detection
+- Added `msoffcrypto-tool>=5.4.0` for DOCX encryption/IRM detection
+- Upgraded all Python packages and AVM Bicep module versions
+- Migrated agent-framework imports from `azure` to `openai` module (1.0.1 API)
+
+#### Code Quality
+- Extracted constants for DOCX extensions and heading levels
+- Centralized logging with structured span context across all pipeline functions
+- 260 unit tests (up from 198 in v0.2.0)
 
 ## [0.2.0] - 2026-04-12
 
@@ -133,6 +178,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Version History
 
+- `0.3.0` - Document protection detection, confidence scoring, re-reasoning, DOCX handling, resilience improvements, 260 tests
 - `0.2.0` - OpenTelemetry observability, criteria download, resource scaling, versioning
 - `0.1.0` - Initial release with core RFP analysis features
 

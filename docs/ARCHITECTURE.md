@@ -434,12 +434,24 @@ flowchart TB
     
     Upload --> DocProc
     
-    DocProc --> CU & DI & TextRead
+    DocProc --> TextRead & ProtCheck
     
     subgraph TextRead["Direct Read (TXT, MD)"]
         TR1["UTF-8 decode"]
         TR2["Instant — no AI needed"]
     end
+    
+    subgraph ProtCheck["🔒 Protection Check (PDF, DOCX)"]
+        PC1["PDF → pypdf PdfReader.is_encrypted"]
+        PC2["DOCX → msoffcrypto OfficeFile.is_encrypted()"]
+        PC3{"Protected?"}
+        PC1 --> PC3
+        PC2 --> PC3
+        PC3 -- Yes --> Err["❌ ValueError:<br>Document is protected"]
+        PC3 -- No --> OK["✅ Proceed to extraction"]
+    end
+    
+    OK --> CU & DI
     
     subgraph CU["Content Understanding"]
         CU1["POST /contentunderstanding/analyzer"]
@@ -465,6 +477,7 @@ flowchart TB
     end
     
     style DocProc fill:#e3f2fd,stroke:#1565c0
+    style ProtCheck fill:#fff3e0,stroke:#ef6c00
     style CU fill:#fff3e0,stroke:#ef6c00
     style DI fill:#e8f5e9,stroke:#2e7d32
 ```
@@ -630,6 +643,59 @@ flowchart TB
 
     style Extract fill:#fff3e0,stroke:#ef6c00
     style Merge fill:#e8f5e9,stroke:#2e7d32
+```
+
+---
+
+## Resilience Architecture
+
+### Document Protection Detection
+
+Before any document is sent to an extraction service, the system checks for encryption or IRM protection. This avoids wasting API calls on documents that cannot be processed.
+
+```mermaid
+flowchart TB
+    Input["📄 Uploaded File"]
+    Input --> Ext{"File extension?"}
+
+    Ext -- .pdf --> PDF["pypdf PdfReader(bytes)"]
+    PDF --> PEnc{"is_encrypted?"}
+    PEnc -- Yes --> Reject["❌ ValueError:<br>'Document is protected (encrypted/IRM).<br>Please remove protection and re-upload.'"]
+    PEnc -- No --> Pass["✅ Proceed"]
+
+    Ext -- .docx --> DOCX["msoffcrypto OfficeFile(bytes)"]
+    DOCX --> DEnc{"is_encrypted()?"}
+    DEnc -- Yes --> Reject
+    DEnc -- No --> Pass
+
+    Ext -- .txt / .md --> Pass
+
+    style Reject fill:#ffcdd2,stroke:#c62828
+    style Pass fill:#c8e6c9,stroke:#2e7d32
+```
+
+### Retry & Refusal Detection
+
+All OpenAI agent calls are wrapped with exponential backoff retry logic. Additionally, AI refusal responses (e.g. *"I'm sorry, but I cannot assist"*) are detected and automatically retried.
+
+```mermaid
+flowchart TB
+    Call["Agent.run() call"]
+    Call --> Response{"Response OK?"}
+
+    Response -- Success --> Parse["Parse structured output"]
+    Parse --> Refusal{"Refusal detected?<br>(7 phrase patterns)"}
+    Refusal -- No --> Accept["✅ Accept result"]
+    Refusal -- Yes --> RetryR["🔄 Retry (new attempt)"]
+
+    Response -- Error / Empty --> RetryE["🔄 Retry with<br>exponential backoff"]
+
+    RetryR --> Call
+    RetryE --> Call
+
+    style Accept fill:#c8e6c9,stroke:#2e7d32
+    style RetryR fill:#fff3e0,stroke:#ef6c00
+    style RetryE fill:#fff3e0,stroke:#ef6c00
 ```
 
 ---
