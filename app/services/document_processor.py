@@ -170,16 +170,17 @@ class DocumentProcessor:
             )
             try:
                 content = await asyncio.to_thread(extract_docx_as_markdown, file_bytes)
-            except ValueError as exc:
+            except ValueError:
                 # The file has a .docx extension but is not a valid Office
                 # Open XML document (e.g. old binary .doc renamed to .docx,
                 # corrupted archive, or non-ZIP data).
                 logger.error(
-                    "[REQ:%s] Local DOCX extraction failed: %s",
+                    "[REQ:%s] Local DOCX extraction failed for %s — "
+                    "file is not a valid DOCX document",
                     request_id,
-                    exc,
+                    filename,
                 )
-                raise ValueError(str(exc)) from exc
+                raise
             duration = time.time() - extract_start
             content_tokens = estimate_token_count(content)
             logger.info(
