@@ -779,16 +779,22 @@ def render_individual_reports(evaluations: list):
         proposal_file = eval_result.get("_proposal_file", "Unknown")
         total_score = eval_result.get("total_score", 0)
         grade = eval_result.get("grade", "N/A")
+        overall_confidence = eval_result.get("overall_confidence", 0.8)
 
-        with st.expander(f"**{vendor_name}** - Score: {total_score:.1f} ({grade})", expanded=i==0):
+        conf_badge = "🟢" if overall_confidence >= 0.9 else "🟡" if overall_confidence >= 0.7 else "🔴"
+        with st.expander(f"**{vendor_name}** - Score: {total_score:.1f} ({grade}) {conf_badge} {overall_confidence:.0%}", expanded=i==0):
             # Score summary
-            col1, col2, col3 = st.columns(3)
+            col1, col2, col3, col4 = st.columns(4)
             with col1:
                 st.metric("Total Score", f"{total_score:.1f}")
             with col2:
                 st.metric("Grade", grade)
             with col3:
                 st.metric("File", proposal_file[:25] + "..." if len(proposal_file) > 25 else proposal_file)
+            with col4:
+                conf_label = "High" if overall_confidence >= 0.9 else "Good" if overall_confidence >= 0.7 else "Low"
+                st.metric("Confidence", f"{overall_confidence:.0%}", delta=conf_label,
+                          delta_color="normal" if overall_confidence >= 0.7 else "inverse")
 
             # Criterion scores with justifications
             st.markdown("#### Criterion Scores & Justifications")
@@ -799,10 +805,20 @@ def render_individual_reports(evaluations: list):
                 criterion_name = cs.get('criterion_name', 'Unknown')
                 weighted_score = cs.get('weighted_score', 0)
                 justification = cs.get('justification', '')
+                cs_confidence = cs.get('confidence', 0.8)
+                cs_iterations = cs.get('reasoning_iterations', 1)
+
+                # Confidence indicator
+                conf_icon = "🟢" if cs_confidence >= 0.9 else "🟡" if cs_confidence >= 0.7 else "🔴"
+                re_reason_tag = " 🔄" if cs_iterations > 1 else ""
 
                 # Show criterion score with expandable justification
                 with st.container():
-                    st.markdown(f"{bar_color} **{criterion_name}**: {score_pct:.1f}/100 (weighted: {weighted_score:.2f})")
+                    st.markdown(
+                        f"{bar_color} **{criterion_name}**: {score_pct:.1f}/100 "
+                        f"(weighted: {weighted_score:.2f}) — "
+                        f"{conf_icon} {cs_confidence:.0%}{re_reason_tag}"
+                    )
                     if justification:
                         with st.expander("📝 View Justification", expanded=False):
                             st.markdown(justification)

@@ -112,10 +112,11 @@ def _render_criteria_review():
     extraction_notes = criteria_data.get("extraction_notes", "")
 
     # Summary header
+    overall_confidence = criteria_data.get("overall_confidence", 0.8)
     st.success(f"✅ **{len(criteria_list)} evaluation criteria** extracted from the RFP")
 
     # RFP Info
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric("RFP Title", rfp_title[:30] + "..." if len(rfp_title) > 30 else rfp_title)
     with col2:
@@ -123,6 +124,14 @@ def _render_criteria_review():
     with col3:
         total_weight = sum(c.get("weight", 0) for c in criteria_list)
         st.metric("Total Weight", f"{total_weight:.1f}%")
+    with col4:
+        conf_pct = f"{overall_confidence:.0%}"
+        if overall_confidence >= 0.9:
+            st.metric("Confidence", conf_pct, delta="High", delta_color="normal")
+        elif overall_confidence >= 0.7:
+            st.metric("Confidence", conf_pct, delta="Good", delta_color="normal")
+        else:
+            st.metric("Confidence", conf_pct, delta="Low", delta_color="inverse")
 
     if rfp_summary:
         st.markdown(f"**RFP Summary:** {rfp_summary}")
@@ -167,6 +176,15 @@ def _render_criteria_review():
         category = c.get("category", "Other")
         weight = c.get("weight", 0)
         guidance = c.get("evaluation_guidance", "")
+        confidence = c.get("confidence", 0.8)
+
+        # Confidence badge
+        if confidence >= 0.9:
+            conf_badge = "🟢"
+        elif confidence >= 0.7:
+            conf_badge = "🟡"
+        else:
+            conf_badge = "🔴"
 
         # Color coding by weight
         if weight >= 20:
@@ -180,15 +198,19 @@ def _render_criteria_review():
             weight_label = "Standard"
 
         with st.expander(
-            f"{weight_icon} **{criterion_id}: {name}** — Weight: {weight:.1f}% ({weight_label})",
+            f"{weight_icon} **{criterion_id}: {name}** — Weight: {weight:.1f}% ({weight_label}) {conf_badge} {confidence:.0%}",
             expanded=False,
         ):
-            col1, col2 = st.columns([3, 1])
+            col1, col2, col3 = st.columns([3, 1, 1])
             with col1:
                 st.markdown(f"**Category:** {category}")
                 st.markdown(f"**Description:** {description}")
             with col2:
                 st.metric("Weight", f"{weight:.1f}%")
+            with col3:
+                conf_label = "High" if confidence >= 0.9 else "Good" if confidence >= 0.7 else "Low"
+                st.metric("Confidence", f"{confidence:.0%}", delta=conf_label,
+                          delta_color="normal" if confidence >= 0.7 else "inverse")
 
             if guidance:
                 st.markdown("**Scoring Guidance:**")
