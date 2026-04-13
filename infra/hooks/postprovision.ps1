@@ -33,7 +33,7 @@ Write-Host "Content Understanding Endpoint: $ContentUnderstandingEndpoint"
 
 # Get access token for Azure Cognitive Services
 Write-Host "Obtaining access token..."
-$AccessToken = az account get-access-token --resource https://cognitiveservices.azure.com --query accessToken -o tsv
+$AccessToken = azd auth token --scope https://cognitiveservices.azure.com/.default
 
 if ([string]::IsNullOrEmpty($AccessToken)) {
     Write-Error "Error: Failed to obtain access token"
