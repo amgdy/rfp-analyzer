@@ -10,6 +10,7 @@ This document provides a comprehensive overview of the RFP Analyzer application 
 - [Multi-Agent System](#multi-agent-system)
 - [Azure Infrastructure](#azure-infrastructure)
 - [Data Flow](#data-flow)
+  - [Large Document Chunking Process](#large-document-chunking-process)
 - [Security Architecture](#security-architecture)
 
 ---
@@ -66,7 +67,7 @@ flowchart TB
 
     subgraph AZURE["☁️ Azure AI Services"]
         direction LR
-        AOA["Azure OpenAI<br>(GPT-4.1+)"]
+        AOA["Azure OpenAI<br>(GPT-5.2 / GPT-4.1)"]
         ADI["Azure Document<br>Intelligence"]
         ACU["Azure AI Content<br>Understanding"]
     end
@@ -102,11 +103,12 @@ flowchart TB
         subgraph Steps["Workflow Steps"]
             S1["Step 1: Upload<br>• RFP file<br>• Proposals<br>• Preview"]
             S2["Step 2: Extract<br>• Service selection<br>• Progress<br>• Results"]
-            S3["Step 3: Evaluate<br>• Criteria extraction<br>• Proposal scoring<br>• Vendor comparison<br>• Export options"]
+            S3["Step 3: Criteria<br>• AI-extracted criteria<br>• Weights review<br>• User confirmation"]
+            S4["Step 4: Score<br>• Proposal scoring<br>• Vendor comparison<br>• Export options"]
         end
         
         SSM --> Steps
-        S1 --> S2 --> S3
+        S1 --> S2 --> S3 --> S4
     end
     
     style StreamlitApp fill:#fff3e0,stroke:#e65100
@@ -132,28 +134,28 @@ flowchart TB
         CUS --> CUC
         DIS --> DIC
         
-        Formats["📄 Supported Formats:<br>PDF, DOCX, PNG, JPG, JPEG, BMP, TIFF"]
+        Formats["📄 Supported Formats:<br>PDF, DOCX (AI extraction)<br>TXT, MD (read directly)"]
     end
     
     style DocProcessor fill:#e3f2fd,stroke:#1565c0
 ```
 
-#### 3. Multi-Agent Scoring System (`scoring_agent_v2.py`)
+#### 3. Multi-Agent Scoring System (`scoring_agent.py`)
 
 Implements the AI-powered evaluation using specialized agents:
 
 ```mermaid
 flowchart TB
-    subgraph ScoringSystem["Scoring Agent V2 System"]
+    subgraph ScoringSystem["Scoring Agent System"]
         subgraph Agent1["Criteria Extraction Agent"]
             I1["Input: RFP Document (Markdown)"]
-            O1["Output: ExtractedCriteria<br>• rfp_title<br>• rfp_summary<br>• criteria[] with weights<br>• evaluation_guidance"]
+            O1["Output: ExtractedCriteria<br>• rfp_title<br>• rfp_summary<br>• criteria[] with weights<br>• evaluation_guidance<br>• confidence scores<br>• auto re-reasoning"]
             I1 --> O1
         end
         
         subgraph Agent2["Proposal Scoring Agent"]
             I2["Input: Proposal + ExtractedCriteria"]
-            O2["Output: ProposalEvaluationV2<br>• total_score<br>• criterion_scores[]<br>• strengths / weaknesses<br>• recommendation"]
+            O2["Output: ProposalEvaluation<br>• total_score<br>• criterion_scores[]<br>• strengths / weaknesses<br>• recommendation<br>• confidence per criterion<br>• reasoning_iterations"]
             I2 --> O2
         end
         
@@ -163,7 +165,7 @@ flowchart TB
             M1["ScoringCriterion"]
             M2["ExtractedCriteria"]
             M3["CriterionScore"]
-            M4["ProposalEvaluationV2"]
+            M4["ProposalEvaluation"]
         end
     end
     
@@ -177,7 +179,7 @@ Compares multiple vendor evaluations and generates comparative analysis:
 ```mermaid
 flowchart TB
     subgraph CompAgent["Comparison Agent"]
-        Input["Input: List[ProposalEvaluationV2]"]
+        Input["Input: List[ProposalEvaluation]"]
         
         subgraph Engine["Analysis Engine"]
             E1["1. Rank vendors by total score"]
@@ -223,8 +225,8 @@ flowchart TB
     end
     
     subgraph Agent1["🔍 AGENT 1: Criteria Extraction"]
-        A1D["• Analyzes RFP requirements<br>• Identifies evaluation criteria<br>• Assigns weights total = 100%<br>• Provides scoring guidance"]
-        A1M["Model: Azure OpenAI GPT-4.1+"]
+        A1D["• Analyzes RFP requirements<br>• Identifies evaluation criteria<br>• Assigns weights total = 100%<br>• Provides scoring guidance<br>• Confidence scoring per criterion<br>• Auto re-reasoning on low confidence"]
+        A1M["Model: Azure OpenAI GPT-5.2"]
         A1O["Output: ExtractedCriteria"]
     end
     
@@ -232,14 +234,14 @@ flowchart TB
     
     subgraph Agent2["📊 AGENT 2: Proposal Scoring - Parallel"]
         direction LR
-        A2A["Scoring Agent<br>Vendor A<br>• Evaluates proposal<br>• Scores per criterion<br>• Provides evidence"]
-        A2B["Scoring Agent<br>Vendor B<br>• Evaluates proposal<br>• Scores per criterion<br>• Provides evidence"]
-        A2N["Scoring Agent<br>Vendor N<br>• Evaluates proposal<br>• Scores per criterion<br>• Provides evidence"]
+        A2A["Scoring Agent<br>Vendor A<br>• Evaluates proposal<br>• Scores per criterion<br>• Confidence scoring<br>• Re-reasons low-confidence"]
+        A2B["Scoring Agent<br>Vendor B<br>• Evaluates proposal<br>• Scores per criterion<br>• Confidence scoring<br>• Re-reasons low-confidence"]
+        A2N["Scoring Agent<br>Vendor N<br>• Evaluates proposal<br>• Scores per criterion<br>• Confidence scoring<br>• Re-reasons low-confidence"]
     end
     
     subgraph Agent3["🏆 AGENT 3: Comparison"]
         A3D["• Ranks all vendors by score<br>• Compares criterion performance<br>• Identifies best/worst performers<br>• Generates recommendations<br>• Assesses comparative risks"]
-        A3M["Model: Azure OpenAI GPT-4.1+"]
+        A3M["Model: Azure OpenAI GPT-5.2"]
         A3O["Output: ComparisonResult"]
     end
     
@@ -400,6 +402,8 @@ flowchart TB
     
     Roles --> R1["Azure AI Developer"]
     Roles --> R2["Cognitive Services User"]
+    Roles --> R3["Cognitive Services OpenAI User"]
+    Roles --> R4["Monitoring Metrics Publisher"]
     
     Main --> Outputs["Outputs"]
     Outputs --> O1["AZURE_CONTAINER_REGISTRY_ENDPOINT"]
@@ -423,14 +427,31 @@ flowchart TB
     Upload["👤 User uploads document(s)"]
     
     subgraph DocProc["Document Processor"]
-        V["1. Validate file type<br>PDF, DOCX, PNG, JPG, etc."]
+        V["1. Validate file type<br>PDF, DOCX, TXT, MD"]
         R["2. Read file bytes into memory"]
-        S["3. Select extraction service<br>based on user choice"]
+        S["3. Classify file type<br>AI extraction vs direct read"]
     end
     
     Upload --> DocProc
     
-    DocProc --> CU & DI
+    DocProc --> TextRead & ProtCheck
+    
+    subgraph TextRead["Direct Read (TXT, MD)"]
+        TR1["UTF-8 decode"]
+        TR2["Instant — no AI needed"]
+    end
+    
+    subgraph ProtCheck["🔒 Protection Check (PDF, DOCX)"]
+        PC1["PDF → pypdf PdfReader.is_encrypted"]
+        PC2["DOCX → msoffcrypto OfficeFile.is_encrypted()"]
+        PC3{"Protected?"}
+        PC1 --> PC3
+        PC2 --> PC3
+        PC3 -- Yes --> Err["❌ ValueError:<br>Document is protected"]
+        PC3 -- No --> OK["✅ Proceed to extraction"]
+    end
+    
+    OK --> CU & DI
     
     subgraph CU["Content Understanding"]
         CU1["POST /contentunderstanding/analyzer"]
@@ -447,7 +468,7 @@ flowchart TB
         DI4["• Extract markdown"]
     end
     
-    CU & DI --> Output
+    CU & DI & TextRead --> Output
     
     subgraph Output["📄 Extracted Markdown"]
         O1["Stored in session:"]
@@ -456,6 +477,7 @@ flowchart TB
     end
     
     style DocProc fill:#e3f2fd,stroke:#1565c0
+    style ProtCheck fill:#fff3e0,stroke:#ef6c00
     style CU fill:#fff3e0,stroke:#ef6c00
     style DI fill:#e8f5e9,stroke:#2e7d32
 ```
@@ -472,23 +494,24 @@ flowchart TB
     
     RFP --> CEA
     
-    subgraph CEA["Criteria Extraction Agent"]
+    subgraph CEA["Step 3: Criteria Extraction Agent"]
         CEA1["Azure OpenAI Call<br>structured output"]
     end
     
     CEA --> EC["ExtractedCriteria<br>Pydantic model"]
     
-    EC --> SA1 & SAN
+    EC --> Review["👤 User Reviews Criteria &amp; Weights"]
+    Review --> SA1 & SAN
     P1 --> SA1
     PN --> SAN
     
-    subgraph Scoring["Parallel Scoring"]
+    subgraph Scoring["Step 4: Parallel Scoring"]
         SA1["Scoring Agent<br>Proposal 1<br>Azure OpenAI"]
         SAN["Scoring Agent<br>Proposal N<br>Azure OpenAI"]
     end
     
-    SA1 --> EV1["Evaluation V2<br>Vendor 1"]
-    SAN --> EVN["Evaluation V2<br>Vendor N"]
+    SA1 --> EV1["Evaluation<br>Vendor 1"]
+    SAN --> EVN["Evaluation<br>Vendor N"]
     
     EV1 & EVN --> CA
     
@@ -509,6 +532,170 @@ flowchart TB
     style Session fill:#f3e5f5,stroke:#7b1fa2
     style Scoring fill:#e8f5e9,stroke:#388e3c
     style CA fill:#fff9c4,stroke:#f9a825
+```
+
+### Confidence Scoring & Auto Re-Reasoning
+
+Each agent produces confidence scores (0.0–1.0) for its outputs. When confidence falls below the configurable `CONFIDENCE_THRESHOLD` (default 0.7), the system automatically triggers a deeper analysis pass.
+
+```mermaid
+flowchart TB
+    subgraph Initial["Initial Extraction / Scoring"]
+        I1["LLM Call → Results with confidence scores"]
+    end
+
+    I1 --> Check{"Overall confidence<br>≥ threshold?"}
+
+    Check -- Yes --> Done["✅ Accept results"]
+    Check -- No --> ReReason
+
+    subgraph ReReason["Re-Reasoning Pass"]
+        R1["Identify low-confidence items"]
+        R2["Follow-up prompt:<br>'Re-examine with deeper analysis'"]
+        R3["Increase reasoning effort to 'high'"]
+        R4["Merge: keep higher-confidence version"]
+    end
+
+    ReReason --> Final["📊 Final Results<br>(improved confidence)"]
+
+    style Initial fill:#e3f2fd,stroke:#1565c0
+    style ReReason fill:#fff3e0,stroke:#ef6c00
+```
+
+### Large Document Chunking Process
+
+When a document exceeds the model's context window (configurable via `MAX_CONTEXT_TOKENS` env var, default 1,050,000 tokens), the system automatically splits it into manageable chunks and processes them using a map-reduce pattern.
+
+#### Scoring Agent — Map-Reduce Chunked Processing
+
+```mermaid
+flowchart TB
+    Doc["📄 Input Document<br>(RFP or Proposal)"]
+
+    Doc --> EstTokens["🔢 Estimate Token Count<br>(chars ÷ 3.5)"]
+    EstTokens --> Check{"Tokens ≤<br>context budget?"}
+
+    Check -- Yes --> Single["✅ Single-Call Processing<br>Send full document to LLM"]
+
+    Check -- No --> Split["✂️ Split by Token Budget"]
+
+    subgraph Splitting["Content Splitting Strategy"]
+        direction TB
+        Split --> H["1. Split by markdown headings"]
+        H --> P["2. Oversized sections → split by paragraphs"]
+        P --> T["3. Oversized paragraphs → truncate at boundary"]
+        T --> OV["4. Add overlap tokens between chunks<br>for context continuity"]
+    end
+
+    subgraph MapPhase["Map Phase — Process Each Chunk"]
+        direction LR
+        C1["📦 Chunk 1<br>LLM Call"]
+        C2["📦 Chunk 2<br>LLM Call"]
+        CN["📦 Chunk N<br>LLM Call"]
+    end
+
+    Splitting --> MapPhase
+
+    subgraph ReducePhase["Reduce Phase — Merge Results"]
+        direction TB
+        Best["For each criterion:<br>keep highest raw_score<br>across all chunks"]
+        Best --> Recalc["Recalculate<br>weighted scores &amp; totals"]
+        Recalc --> Dedup["Deduplicate strengths,<br>weaknesses, recommendations"]
+        Dedup --> Grade["Assign final grade<br>(A/B/C/D/F)"]
+    end
+
+    MapPhase --> ReducePhase
+    ReducePhase --> Final["📊 Final Merged Evaluation"]
+    Single --> Final
+
+    style Splitting fill:#e3f2fd,stroke:#1565c0
+    style MapPhase fill:#fff3e0,stroke:#ef6c00
+    style ReducePhase fill:#e8f5e9,stroke:#2e7d32
+```
+
+#### Criteria Extraction — Chunked Merge
+
+When the RFP document itself is too large for a single LLM call, criteria extraction also uses chunking:
+
+```mermaid
+flowchart TB
+    RFP["📄 Large RFP Document"]
+    RFP --> Split["✂️ Split into N chunks<br>(by heading / paragraph boundaries)"]
+
+    subgraph Extract["Extract Criteria per Chunk"]
+        direction LR
+        E1["Chunk 1 → Criteria[]"]
+        E2["Chunk 2 → Criteria[]"]
+        EN["Chunk N → Criteria[]"]
+    end
+
+    Split --> Extract
+
+    subgraph Merge["Merge &amp; Normalize"]
+        direction TB
+        DD["Deduplicate criteria<br>(by name, case-insensitive)"]
+        DD --> ReID["Re-assign criterion IDs<br>(C-1, C-2, …)"]
+        ReID --> Norm["Normalize weights<br>to sum = 100%"]
+    end
+
+    Extract --> Merge
+    Merge --> Out["📋 ExtractedCriteria<br>(unified, deduplicated)"]
+
+    style Extract fill:#fff3e0,stroke:#ef6c00
+    style Merge fill:#e8f5e9,stroke:#2e7d32
+```
+
+---
+
+## Resilience Architecture
+
+### Document Protection Detection
+
+Before any document is sent to an extraction service, the system checks for encryption or IRM protection. This avoids wasting API calls on documents that cannot be processed.
+
+```mermaid
+flowchart TB
+    Input["📄 Uploaded File"]
+    Input --> Ext{"File extension?"}
+
+    Ext -- .pdf --> PDF["pypdf PdfReader(bytes)"]
+    PDF --> PEnc{"is_encrypted?"}
+    PEnc -- Yes --> Reject["❌ ValueError:<br>'Document is protected (encrypted/IRM).<br>Please remove protection and re-upload.'"]
+    PEnc -- No --> Pass["✅ Proceed"]
+
+    Ext -- .docx --> DOCX["msoffcrypto OfficeFile(bytes)"]
+    DOCX --> DEnc{"is_encrypted()?"}
+    DEnc -- Yes --> Reject
+    DEnc -- No --> Pass
+
+    Ext -- .txt / .md --> Pass
+
+    style Reject fill:#ffcdd2,stroke:#c62828
+    style Pass fill:#c8e6c9,stroke:#2e7d32
+```
+
+### Retry & Refusal Detection
+
+All OpenAI agent calls are wrapped with exponential backoff retry logic. Additionally, AI refusal responses (e.g. *"I'm sorry, but I cannot assist"*) are detected and automatically retried.
+
+```mermaid
+flowchart TB
+    Call["Agent.run() call"]
+    Call --> Response{"Response OK?"}
+
+    Response -- Success --> Parse["Parse structured output"]
+    Parse --> Refusal{"Refusal detected?<br>(7 phrase patterns)"}
+    Refusal -- No --> Accept["✅ Accept result"]
+    Refusal -- Yes --> RetryR["🔄 Retry (new attempt)"]
+
+    Response -- Error / Empty --> RetryE["🔄 Retry with<br>exponential backoff"]
+
+    RetryR --> Call
+    RetryE --> Call
+
+    style Accept fill:#c8e6c9,stroke:#2e7d32
+    style RetryR fill:#fff3e0,stroke:#ef6c00
+    style RetryE fill:#fff3e0,stroke:#ef6c00
 ```
 
 ---
@@ -549,12 +736,14 @@ flowchart TB
 flowchart TB
     MI["🔐 User-Assigned Managed Identity<br>rfp-analyzer-identity"]
     
-    MI --> R1 & R2 & R3
+    MI --> R1 & R2 & R3 & R4 & R5
     
     subgraph Roles["Role Assignments"]
         R1["Azure AI Developer<br><br>Scope: Resource Group<br><br>Allows:<br>• Create/manage AI resources<br>• Deploy models"]
         R2["Cognitive Services User<br><br>Scope: Resource Group<br><br>Allows:<br>• Use AI services<br>• Make API calls"]
-        R3["AcrPull<br><br>Scope: Container Registry<br><br>Allows:<br>• Pull images"]
+        R3["Cognitive Services OpenAI User<br><br>Scope: Resource Group<br><br>Allows:<br>• Keyless OpenAI API access<br>• Responses API calls"]
+        R4["Monitoring Metrics Publisher<br><br>Scope: Resource Group<br><br>Allows:<br>• Publish telemetry metrics<br>• App Insights data ingestion"]
+        R5["AcrPull<br><br>Scope: Container Registry<br><br>Allows:<br>• Pull images"]
     end
     
     subgraph Security["🛡️ Security Features"]
@@ -632,6 +821,8 @@ flowchart TB
         ACA10["• AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT"]
         ACA11["• AZURE_CLIENT_ID (managed identity)"]
         ACA12["• APPLICATIONINSIGHTS_CONNECTION_STRING"]
+        ACA13["• OTEL_LOGGING_ENABLED"]
+        ACA14["• OTEL_TRACING_ENABLED"]
     end
     
     Source --> Docker --> ACR --> ACA
@@ -704,6 +895,7 @@ classDiagram
         +float weight
         +int max_score
         +str evaluation_guidance
+        +float confidence
     }
     
     class ExtractedCriteria {
@@ -712,6 +904,7 @@ classDiagram
         +float total_weight
         +List~ScoringCriterion~ criteria
         +str extraction_notes
+        +float overall_confidence
     }
     
     class CriterionScore {
@@ -724,14 +917,18 @@ classDiagram
         +str justification
         +List~str~ strengths
         +List~str~ gaps
+        +float confidence
+        +int reasoning_iterations
     }
     
-    class ProposalEvaluationV2 {
+    class ProposalEvaluation {
         +str rfp_title
         +str supplier_name
         +str supplier_site
         +str response_id
         +str evaluation_date
+        +bool is_qualified_proposal
+        +str disqualification_reason
         +float total_score
         +float score_percentage
         +str grade
@@ -742,6 +939,7 @@ classDiagram
         +List~str~ overall_weaknesses
         +List~str~ recommendations
         +str risk_assessment
+        +float overall_confidence
     }
     
     class VendorRanking {
@@ -767,7 +965,7 @@ classDiagram
     }
     
     ExtractedCriteria "1" *-- "*" ScoringCriterion
-    ProposalEvaluationV2 "1" *-- "*" CriterionScore
+    ProposalEvaluation "1" *-- "*" CriterionScore
     ComparisonResult "1" *-- "*" VendorRanking
 ```
 
@@ -781,6 +979,9 @@ classDiagram
         +AzureDocumentIntelligenceClient di_client
         +__init__(service: ExtractionService)
         +process_document(file_bytes, filename) str
+        +requires_ai_extraction(filename)$ bool
+        +TEXT_EXTENSIONS$ tuple
+        +AI_EXTRACTED_EXTENSIONS$ tuple
     }
     
     class CriteriaExtractionAgent {
@@ -792,7 +993,7 @@ classDiagram
     class ProposalScoringAgent {
         +AzureOpenAIResponsesClient client
         +str model
-        +score_proposal(proposal, criteria) ProposalEvaluationV2
+        +score_proposal(proposal, criteria) ProposalEvaluation
     }
     
     class ComparisonAgent {
@@ -811,7 +1012,7 @@ classDiagram
     
     DocumentProcessor --> ExtractionService
     CriteriaExtractionAgent --> ExtractedCriteria
-    ProposalScoringAgent --> ProposalEvaluationV2
+    ProposalScoringAgent --> ProposalEvaluation
     ComparisonAgent --> ComparisonResult
 ```
 
@@ -841,16 +1042,17 @@ sequenceDiagram
     CU-->>DP: Markdown content
     DP-->>UI: Store extracted content
     
-    User->>UI: Click "Evaluate"
+    User->>UI: Click "Extract Criteria"
     UI->>CEA: Extract criteria from RFP
     CEA->>AOAI: Structured output request
     AOAI-->>CEA: ExtractedCriteria
-    CEA-->>UI: Criteria extracted
+    CEA-->>UI: Display criteria for review
     
+    User->>UI: Review criteria & Click "Score"
     loop For each proposal
         UI->>PSA: Score proposal
         PSA->>AOAI: Structured output request
-        AOAI-->>PSA: ProposalEvaluationV2
+        AOAI-->>PSA: ProposalEvaluation
         PSA-->>UI: Evaluation complete
     end
     

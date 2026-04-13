@@ -12,6 +12,7 @@ param foundryLocation string
 
 var abbrs = loadJsonContent('./abbreviations.json')
 var resourceToken = substring(toLower(uniqueString(subscription().id, resourceGroup().id, location)), 0, 6)
+var workload = 'rfpa'
 
 
 var modelName = 'gpt-5.2'
@@ -73,9 +74,9 @@ var defaultOpenAiDeployments = [
 module monitoring 'br/public:avm/ptn/azd/monitoring:0.2.1' = {
   name: 'monitoring'
   params: {
-    logAnalyticsName: '${abbrs.operationalInsightsWorkspaces}${resourceToken}'
-    applicationInsightsName: '${abbrs.insightsComponents}${resourceToken}'
-    applicationInsightsDashboardName: '${abbrs.portalDashboards}${resourceToken}'
+    logAnalyticsName: '${abbrs.operationalInsightsWorkspaces}${workload}-${resourceToken}'
+    applicationInsightsName: '${abbrs.insightsComponents}${workload}-${resourceToken}'
+    applicationInsightsDashboardName: '${abbrs.portalDashboards}${workload}-${resourceToken}'
     location: location
     tags: tags
     enableTelemetry: true
@@ -83,16 +84,16 @@ module monitoring 'br/public:avm/ptn/azd/monitoring:0.2.1' = {
 }
 
 
-var foundryProjectName = 'proj-rfpa-${resourceToken}'
-var foundryAccountName = '${abbrs.aiFoundryAccounts}-rfpa-${resourceToken}'
+var foundryProjectName = '${abbrs.aiFoundryProjects}${workload}-${resourceToken}'
+var foundryAccountName = '${abbrs.aiFoundryAccounts}${workload}-${resourceToken}'
 
 // Microsoft Foundry Resource
-module foundryAccount 'br/public:avm/res/cognitive-services/account:0.14.1' = {
+module foundryAccount 'br/public:avm/res/cognitive-services/account:0.14.2' = {
   name: 'foundry-project'
   params:{
     name: foundryAccountName
     kind: 'AIServices'
-    location: location
+    location: foundryLocation
     tags: tags
     networkAcls: {
       defaultAction: 'Allow'
@@ -109,19 +110,16 @@ module foundryAccount 'br/public:avm/res/cognitive-services/account:0.14.1' = {
   }
 }
 
-// Get existing Foundry Account Resource
+// Reference the deployed Foundry Account for use as parent
 resource foundryAccountResource 'Microsoft.CognitiveServices/accounts@2025-09-01' existing = {
   name: foundryAccountName
-  dependsOn: [
-    foundryAccount
-  ]
 }
 
 // Microsoft Foundry Project Resource
 resource foundryProject 'Microsoft.CognitiveServices/accounts/projects@2025-09-01' = {
   name: foundryProjectName
   parent: foundryAccountResource
-  location: location
+  location: foundryLocation
   identity: {
     type: 'SystemAssigned'
   }
@@ -129,6 +127,9 @@ resource foundryProject 'Microsoft.CognitiveServices/accounts/projects@2025-09-0
     displayName: foundryProjectName
     description: 'RFP Analyzer Foundry Project'
   }
+  dependsOn: [
+    foundryAccount
+  ]
 }
 
 // Application Insights Connection to Foundry Project
@@ -151,7 +152,7 @@ resource appInsightsFoundryConnection 'Microsoft.CognitiveServices/accounts/proj
 }
 
 var azureOpenAiEndpoint = foundryAccount.outputs.endpoints['OpenAI Language Model Instance API']
-var documentIntelligenceEndpoint = foundryAccount.outputs.endpoints['FormRecognizer']
+var documentIntelligenceEndpoint = foundryAccount.outputs.endpoints.FormRecognizer
 var contentUnderstandingEndpoint = foundryAccount.outputs.endpoints['Content Understanding']
 
 
@@ -159,16 +160,16 @@ var contentUnderstandingEndpoint = foundryAccount.outputs.endpoints['Content Und
 module rfpAnalyzerIdentity 'br/public:avm/res/managed-identity/user-assigned-identity:0.5.0' = {
   name: 'rfpAnalyzeridentity'
   params: {
-    name: '${abbrs.managedIdentityUserAssignedIdentities}rfpAnalyzer-${resourceToken}'
+    name: '${abbrs.managedIdentityUserAssignedIdentities}${workload}-${resourceToken}'
     location: location
   }
 }
 
 // Container registry
-module containerRegistry 'br/public:avm/res/container-registry/registry:0.10.0' = {
+module containerRegistry 'br/public:avm/res/container-registry/registry:0.12.1' = {
   name: 'registry'
   params: {
-    name: '${abbrs.containerRegistryRegistries}${resourceToken}'
+    name: '${abbrs.containerRegistryRegistries}${workload}${resourceToken}'
     location: location
     tags: tags
     acrSku: 'Standard'
@@ -187,16 +188,19 @@ module containerRegistry 'br/public:avm/res/container-registry/registry:0.10.0' 
 }
 
 // Container apps environment
-module containerAppsEnvironment 'br/public:avm/res/app/managed-environment:0.10.2' = {
+module containerAppsEnvironment 'br/public:avm/res/app/managed-environment:0.13.1' = {
   name: 'container-apps-environment'
   params: {
-    logAnalyticsWorkspaceResourceId: monitoring.outputs.logAnalyticsWorkspaceResourceId
-    name: '${abbrs.appManagedEnvironments}${resourceToken}'
+    name: '${abbrs.appManagedEnvironments}${workload}-${resourceToken}'
     location: location
     zoneRedundant: false
     publicNetworkAccess: 'Enabled'
     tags: tags
     enableTelemetry: true
+    appLogsConfiguration: {
+      destination: 'log-analytics'
+      logAnalyticsWorkspaceResourceId: monitoring.outputs.logAnalyticsWorkspaceResourceId
+    }
   }
 }
 
@@ -204,14 +208,14 @@ module rfpAnalyzerFetchLatestImage './modules/fetch-container-image.bicep' = {
   name: 'rfpAnalyzer-fetch-image'
   params: {
     exists: rfpAnalyzerExists
-    name: 'rfp-analyzer'
+    name: '${abbrs.appContainerApps}${workload}-${resourceToken}'
   }
 }
 
-module rfpAnalyzer 'br/public:avm/res/app/container-app:0.20.0' = {
+module rfpAnalyzer 'br/public:avm/res/app/container-app:0.22.0' = {
   name: 'rfpAnalyzer'
   params: {
-    name: 'rfp-analyzer'
+    name: '${abbrs.appContainerApps}${workload}-${resourceToken}'
     ingressTargetPort: 8501
     ingressExternal: true
     // Allow larger file uploads (default is often 100MB, set to 200MB for RFP documents)
@@ -243,19 +247,19 @@ module rfpAnalyzer 'br/public:avm/res/app/container-app:0.20.0' = {
           }
           {
             name: 'AZURE_OPENAI_ENDPOINT'
-            value: '${azureOpenAiEndpoint}/openai/'
+            value: azureOpenAiEndpoint
           }
           {
             name: 'AZURE_OPENAI_DEPLOYMENT_NAME'
             value: modelName
           }
           {
-            name: 'AZURE_OPENAI_RESPONSES_DEPLOYMENT_NAME'
-            value: modelName
+            name: 'OTEL_LOGGING_ENABLED'
+            value: 'true'
           }
           {
-            name: 'OTEL_LOGGING_ENABLED'
-            value: 'false'
+            name: 'OTEL_TRACING_ENABLED'
+            value: 'true'
           }
           {
             name: 'AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT'
@@ -264,6 +268,14 @@ module rfpAnalyzer 'br/public:avm/res/app/container-app:0.20.0' = {
           {
             name: 'PORT'
             value: '8501'
+          }
+          {
+            name: 'STREAMLIT_SERVER_MAX_UPLOAD_SIZE'
+            value: '500'
+          }
+          {
+            name: 'STREAMLIT_SERVER_MAX_MESSAGE_SIZE'
+            value: '500'
           }
         ]
       }
@@ -304,6 +316,26 @@ module rfpAnalyzerbackendRoleCognitiveServicesUserRG 'br/public:avm/res/authoriz
     // Non-required parameters
     principalType: 'ServicePrincipal'
     description: 'Role assignment for Cognitive Services User in Resource Group scope'
+  }
+}
+
+// Cognitive Services OpenAI User – required for keyless OpenAI API calls (Responses API)
+module rfpAnalyzerbackendRoleCognitiveServicesOpenAIUserRG 'br/public:avm/res/authorization/role-assignment/rg-scope:0.1.1' = {
+  params: {
+    principalId: rfpAnalyzerIdentity.outputs.principalId
+    roleDefinitionIdOrName: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd')
+    principalType: 'ServicePrincipal'
+    description: 'Role assignment for Cognitive Services OpenAI User in Resource Group scope'
+  }
+}
+
+// Monitoring Metrics Publisher – required for App Insights telemetry with managed identity
+module rfpAnalyzerbackendRoleMonitoringMetricsPublisherRG 'br/public:avm/res/authorization/role-assignment/rg-scope:0.1.1' = {
+  params: {
+    principalId: rfpAnalyzerIdentity.outputs.principalId
+    roleDefinitionIdOrName: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '3913510d-42f4-4e42-8a64-420c390055eb')
+    principalType: 'ServicePrincipal'
+    description: 'Role assignment for Monitoring Metrics Publisher in Resource Group scope'
   }
 }
 

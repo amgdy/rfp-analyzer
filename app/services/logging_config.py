@@ -5,6 +5,7 @@ This module provides unified logging configuration with:
 - Console handler (stdout)
 - File handler (rotating log files)
 - OpenTelemetry handler (Azure Monitor / Log Analytics)
+- OTLP log exporter (Aspire Dashboard, Jaeger, etc.)
 
 Usage:
     from services.logging_config import setup_logging, get_logger
@@ -37,9 +38,16 @@ _logging_configured = False
 
 
 def _get_otel_enabled_default() -> bool:
-    """Get default value for log_to_otel from environment variable."""
-    env_value = os.getenv("OTEL_LOGGING_ENABLED", "false").lower()
-    return env_value in ("true", "1", "yes", "on")
+    """Get default value for log_to_otel from environment variable.
+    
+    Defaults to True when APPLICATIONINSIGHTS_CONNECTION_STRING is set,
+    allowing explicit override via OTEL_LOGGING_ENABLED=false.
+    """
+    env_value = os.getenv("OTEL_LOGGING_ENABLED", "").lower()
+    if env_value:
+        return env_value in ("true", "1", "yes", "on")
+    # Auto-enable when App Insights connection string is available
+    return bool(os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"))
 
 
 def setup_logging(
@@ -110,6 +118,12 @@ def setup_logging(
         conn_str = connection_string or os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING")
         if conn_str:
             otel_enabled = _setup_otel_logging(root_logger, conn_str, level)
+
+    # OTLP Log Exporter (for Aspire Dashboard, Jaeger, etc.)
+    otlp_log_enabled = False
+    otlp_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+    if otlp_endpoint:
+        otlp_log_enabled = _setup_otlp_logging(root_logger, otlp_endpoint, level)
     
     # Suppress noisy loggers from being sent to all handlers
     # These generate high volume logs that can cause throttling (HTTP 439)
@@ -119,8 +133,10 @@ def setup_logging(
     
     # Log startup message
     startup_logger = logging.getLogger("rfp_analyzer.logging")
-    startup_logger.info("Logging initialized - Console: %s, File: %s, OpenTelemetry: %s",
-                        log_to_console, log_to_file, otel_enabled)
+    startup_logger.info(
+        "Logging initialized - Console: %s, File: %s, Azure Monitor: %s, OTLP: %s",
+        log_to_console, log_to_file, otel_enabled, otlp_log_enabled,
+    )
 
 
 def _setup_otel_logging(root_logger: logging.Logger, connection_string: str, level: int) -> bool:
@@ -185,6 +201,63 @@ def _setup_otel_logging(root_logger: logging.Logger, connection_string: str, lev
         # Don't fail startup if OTEL setup fails
         logging.getLogger("rfp_analyzer.logging").warning(
             "Failed to setup OpenTelemetry logging: %s", str(e)
+        )
+        return False
+
+
+def _setup_otlp_logging(root_logger: logging.Logger, endpoint: str, level: int) -> bool:
+    """
+    Set up OTLP log exporter for Aspire Dashboard / generic OTLP collector.
+
+    Args:
+        root_logger: The root logger to attach the handler to
+        endpoint: OTLP endpoint URL (e.g., http://localhost:4317)
+        level: Logging level
+
+    Returns:
+        True if OTLP logging was successfully set up, False otherwise
+    """
+    try:
+        from opentelemetry._logs import set_logger_provider
+        from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
+        from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
+        from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter
+        from opentelemetry.sdk.resources import Resource, SERVICE_NAME
+
+        resource = Resource.create({
+            SERVICE_NAME: "rfp-analyzer",
+        })
+
+        logger_provider = LoggerProvider(resource=resource)
+
+        otlp_exporter = OTLPLogExporter(endpoint=endpoint, insecure=True)
+        logger_provider.add_log_record_processor(
+            BatchLogRecordProcessor(
+                otlp_exporter,
+                max_queue_size=2048,
+                schedule_delay_millis=3000,
+                max_export_batch_size=512,
+                export_timeout_millis=10000,
+            )
+        )
+
+        set_logger_provider(logger_provider)
+
+        otel_handler = LoggingHandler(
+            level=level,
+            logger_provider=logger_provider,
+        )
+        root_logger.addHandler(otel_handler)
+        return True
+
+    except ImportError:
+        logging.getLogger("rfp_analyzer.logging").debug(
+            "OTLP log exporter packages not installed — OTLP logging disabled."
+        )
+        return False
+    except Exception as e:
+        logging.getLogger("rfp_analyzer.logging").warning(
+            "Failed to setup OTLP logging: %s", str(e)
         )
         return False
 

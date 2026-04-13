@@ -67,16 +67,21 @@ The command will:
 2. Click **"Extract All Documents"**
 3. Wait for processing to complete
 
-### Step 3: Evaluate & Compare
+### Step 3: Review Criteria
 
-1. Click **"Start Evaluation"**
+1. Click **"Extract Criteria"** to analyze the RFP
+2. Review the AI-extracted evaluation criteria and weights
+3. Confirm criteria before proceeding
+
+### Step 4: Score & Compare
+
+1. Click **"Score Proposals"**
 2. The AI will:
-   - Extract evaluation criteria from the RFP
-   - Score each proposal
+   - Score each proposal against the criteria
    - Generate comparative rankings
 3. Review results in the interface
 
-### Step 4: Export Results
+### Step 5: Export Results
 
 Download your results:
 - **CSV**: Spreadsheet with all metrics

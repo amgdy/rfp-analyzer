@@ -13,14 +13,21 @@ import io
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Callable
 
-from agent_framework.azure import AzureOpenAIResponsesClient
+from agent_framework.openai import OpenAIChatClient
 from agent_framework import Agent
 from azure.identity import DefaultAzureCredential
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
 from .logging_config import get_logger
+from .token_utils import (
+    estimate_token_count,
+    calculate_token_budget,
+    truncate_content,
+)
 from .utils import parse_json_response
+from .retry_utils import run_with_retry, check_for_refusal
+from .telemetry import get_tracer
 
 # Optional dependency for Word document generation
 try:
@@ -36,6 +43,7 @@ load_dotenv()
 
 # Get logger from centralized config
 logger = get_logger(__name__)
+tracer = get_tracer(__name__)
 
 
 class VendorRanking(BaseModel):
@@ -173,18 +181,18 @@ Respond with a valid JSON object:
 
         self._validate_config()
 
-        endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+        endpoint = os.getenv("AZURE_OPENAI_ENDPOINT", "").rstrip("/")
         deployment_name = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME")
 
-        self.client = AzureOpenAIResponsesClient(
+        self.client = OpenAIChatClient(
             credential=DefaultAzureCredential(),
-            endpoint=endpoint,
-            deployment_name=deployment_name,
+            azure_endpoint=endpoint,
+            model=deployment_name,
             api_version="v1",
         )
 
         self.deployment_name = deployment_name
-        logger.info("ComparisonAgent initialized")
+        logger.info("ComparisonAgent initialized with endpoint: %s", endpoint)
 
     def _validate_config(self):
         """Validate required configuration."""
@@ -205,6 +213,9 @@ Respond with a valid JSON object:
         """
         Compare multiple vendor evaluations.
 
+        If the formatted evaluations exceed the model context window,
+        automatically truncates the summary to fit.
+
         Args:
             evaluations: List of evaluation results from individual vendor scoring
             rfp_title: Title of the RFP
@@ -221,13 +232,36 @@ Respond with a valid JSON object:
             reasoning_effort,
         )
 
-        if progress_callback:
-            progress_callback("Preparing vendor comparison...")
+        with tracer.start_as_current_span("ComparisonAgent.compare_evaluations") as span:
+            span.set_attribute("comparison.vendor_count", len(evaluations))
+            span.set_attribute("comparison.reasoning_effort", reasoning_effort)
+            span.set_attribute("comparison.rfp_title", rfp_title)
 
-        # Format evaluations for the prompt
-        evaluations_summary = self._format_evaluations_for_prompt(evaluations)
+            if progress_callback:
+                progress_callback("Preparing vendor comparison...")
 
-        user_prompt = f"""Please compare the following vendor evaluations and provide a comprehensive analysis.
+            # Format evaluations for the prompt
+            evaluations_summary = self._format_evaluations_for_prompt(evaluations)
+
+            # Check token budget and truncate if needed
+            budget = calculate_token_budget(self.SYSTEM_INSTRUCTIONS)
+            prompt_overhead = estimate_token_count(
+                f"Please compare the following vendor evaluations.\n\n"
+                f"## RFP TITLE: {rfp_title}\n\n## VENDOR EVALUATIONS:\n\n---\n\n"
+                f"REQUIREMENTS:\n1-5...\nRespond with ONLY valid JSON."
+            )
+            content_budget = budget - prompt_overhead
+            summary_tokens = estimate_token_count(evaluations_summary)
+
+            if summary_tokens > content_budget:
+                logger.warning(
+                    "Comparison summary (~%d tokens) exceeds budget (%d tokens) — truncating",
+                    summary_tokens,
+                    content_budget,
+                )
+                evaluations_summary = truncate_content(evaluations_summary, content_budget)
+
+            user_prompt = f"""Please compare the following vendor evaluations and provide a comprehensive analysis.
 
 ## RFP TITLE: {rfp_title}
 
@@ -246,55 +280,62 @@ REQUIREMENTS:
 
 Respond with ONLY valid JSON matching the schema in your instructions."""
 
-        try:
-            agent = Agent(
-                client=self.client,
-                instructions=self.SYSTEM_INSTRUCTIONS,
-                name="Comparison Agent",
-                additional_chat_options={
-                    "reasoning": {"effort": reasoning_effort, "summary": "detailed"}
-                },
-            )
-
-            if progress_callback:
-                progress_callback("Analyzing vendor comparisons...")
-
-            result = await agent.run(user_prompt)
-            response_text = result.text
-
-            # Log token usage
-            usage = result.usage_details
-            if usage:
-                input_tokens = getattr(usage, "input_token_count", 0) or 0
-                output_tokens = getattr(usage, "output_token_count", 0) or 0
-                total_tokens = getattr(usage, "total_token_count", 0) or 0
-                logger.info(
-                    "Comparison - Tokens: Input=%d, Output=%d, Total=%d",
-                    input_tokens,
-                    output_tokens,
-                    total_tokens,
+            try:
+                agent = Agent(
+                    client=self.client,
+                    instructions=self.SYSTEM_INSTRUCTIONS,
+                    name="Comparison Agent",
+                    default_options={
+                        "reasoning": {"effort": reasoning_effort, "summary": "detailed"}
+                    },
                 )
 
-            # Parse the response
-            comparison_data = self._parse_response(response_text)
+                if progress_callback:
+                    progress_callback("Analyzing vendor comparisons...")
 
-            duration = time.time() - start_time
-            logger.info("Comparison completed in %.2fs", duration)
+                result = await run_with_retry(
+                    lambda: agent.run(user_prompt),
+                    description="Vendor comparison",
+                )
+                response_text = result.text
 
-            # Add metadata
-            comparison_data["_metadata"] = {
-                "comparison_timestamp": datetime.now().isoformat(),
-                "total_duration_seconds": round(duration, 2),
-                "vendors_compared": len(evaluations),
-                "model_deployment": self.deployment_name,
-                "reasoning_effort": reasoning_effort,
-            }
+                # Log token usage
+                usage = result.usage_details
+                if usage:
+                    input_tokens = getattr(usage, "input_token_count", 0) or 0
+                    output_tokens = getattr(usage, "output_token_count", 0) or 0
+                    total_tokens = getattr(usage, "total_token_count", 0) or 0
+                    logger.info(
+                        "Comparison - Tokens: Input=%d, Output=%d, Total=%d",
+                        input_tokens,
+                        output_tokens,
+                        total_tokens,
+                    )
+                    span.set_attribute("llm.input_tokens", input_tokens)
+                    span.set_attribute("llm.output_tokens", output_tokens)
 
-            return comparison_data
+                # Parse the response
+                comparison_data = self._parse_response(response_text)
 
-        except Exception as e:
-            logger.error("Comparison failed: %s", str(e))
-            raise
+                duration = time.time() - start_time
+                span.set_attribute("comparison.duration_seconds", duration)
+                logger.info("Comparison completed in %.2fs", duration)
+
+                # Add metadata
+                comparison_data["_metadata"] = {
+                    "comparison_timestamp": datetime.now().isoformat(),
+                    "total_duration_seconds": round(duration, 2),
+                    "vendors_compared": len(evaluations),
+                    "model_deployment": self.deployment_name,
+                    "reasoning_effort": reasoning_effort,
+                }
+
+                return comparison_data
+
+            except Exception as e:
+                span.record_exception(e)
+                logger.error("Comparison failed: %s", str(e))
+                raise
 
     def _format_evaluations_for_prompt(self, evaluations: List[Dict[str, Any]]) -> str:
         """Format evaluations for the comparison prompt."""
@@ -305,33 +346,42 @@ Respond with ONLY valid JSON matching the schema in your instructions."""
             total_score = eval_result.get("total_score", 0)
             grade = eval_result.get("grade", "N/A")
 
-            summary = f"""### Vendor {i}: {vendor_name}
+            parts = [f"""### Vendor {i}: {vendor_name}
 - **Total Score:** {total_score:.2f}
 - **Grade:** {grade}
 
 **Criterion Scores:**
-"""
+"""]
 
             # Add criterion scores
             criterion_scores = eval_result.get("criterion_scores", [])
             for cs in criterion_scores:
-                summary += f"- {cs.get('criterion_name', cs.get('criterion_id', 'Unknown'))}: {cs.get('raw_score', 0):.1f} (weighted: {cs.get('weighted_score', 0):.2f})\n"
+                parts.append(f"- {cs.get('criterion_name', cs.get('criterion_id', 'Unknown'))}: {cs.get('raw_score', 0):.1f} (weighted: {cs.get('weighted_score', 0):.2f})\n")
 
             # Add strengths and weaknesses
             strengths = eval_result.get("overall_strengths", [])
             weaknesses = eval_result.get("overall_weaknesses", [])
 
             if strengths:
-                summary += "\n**Strengths:** " + ", ".join(strengths[:5])
+                parts.append("\n**Strengths:** " + ", ".join(strengths[:5]))
             if weaknesses:
-                summary += "\n**Weaknesses:** " + ", ".join(weaknesses[:5])
+                parts.append("\n**Weaknesses:** " + ", ".join(weaknesses[:5]))
 
-            formatted.append(summary)
+            formatted.append("".join(parts))
 
         return "\n\n---\n\n".join(formatted)
 
     def _parse_response(self, response_text: str) -> Dict[str, Any]:
         """Parse the agent response."""
+        # Raise on empty/None so the caller's retry logic can kick in
+        if not response_text or not response_text.strip():
+            raise RuntimeError(
+                "Model returned empty response text — cannot compare vendors"
+            )
+
+        # Raise on model refusal so the retry logic retries automatically
+        check_for_refusal(response_text)
+
         try:
             return parse_json_response(response_text)
         except json.JSONDecodeError as e:

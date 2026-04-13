@@ -12,26 +12,38 @@ RFP Analyzer automates the complex process of evaluating vendor proposals agains
 
 ### Key Capabilities
 
-- **Automated Document Processing**: Extract content from PDFs, Word documents, and images using Azure AI
-- **Intelligent Criteria Extraction**: Automatically identify evaluation criteria and weights from RFP documents
+- **Automated Document Processing**: Extract content from PDFs and Word documents using Azure AI; text files (TXT, MD) are read directly
+- **Document Protection Detection**: Encrypted and IRM-protected PDFs and DOCX files are detected before processing with clear, actionable error messages
+- **Intelligent Criteria Extraction**: Automatically identify evaluation criteria and weights from RFP documents with confidence scoring
+- **Confidence-Driven Re-Reasoning**: Low-confidence criteria and scores are automatically re-analyzed for improved accuracy
 - **Multi-Vendor Comparison**: Evaluate and rank multiple vendor proposals simultaneously
+- **Large Document Support**: Token-aware chunking with map-reduce for documents exceeding model context windows
 - **Comprehensive Reporting**: Generate detailed reports in Word, CSV, and JSON formats
+- **Resilient AI Pipeline**: Automatic retry with exponential backoff and AI refusal detection
 
 ## ✨ Features
 
-### 3-Step Workflow
+### 4-Step Workflow
 
 1. **📤 Upload Documents**
-   - Upload your RFP document (PDF, DOCX, or images)
+   - Upload your RFP document (PDF, DOCX, TXT, or MD)
    - Upload multiple vendor proposals for comparison
+   - AI-extracted formats (PDF, DOCX) use Azure AI services; text files (TXT, MD) are read instantly
+   - Protected (encrypted/IRM) documents are detected automatically with a clear message
 
-2. **⚙️ Configure & Extract**
+2. **⚙️ Extract Content**
    - Choose extraction service (Azure Content Understanding or Document Intelligence)
    - Extract structured content from all documents
 
-3. **🤖 AI-Powered Evaluation**
-   - Automatic criteria extraction from RFP
-   - Score each proposal against identified criteria
+3. **📋 Review Criteria**
+   - AI-extracted evaluation criteria with weights and confidence scores
+   - Confidence badges per criterion (🟢 High / 🟡 Medium / 🔴 Low)
+   - Automatic re-reasoning for low-confidence criteria
+   - Review and confirm before scoring
+
+4. **🤖 AI-Powered Evaluation**
+   - Score each proposal against identified criteria with confidence scoring
+   - Automatic re-reasoning on low-confidence scores for deeper analysis
    - Generate comparative rankings and recommendations
 
 ### Document Extraction Services
@@ -47,9 +59,20 @@ The evaluation system uses specialized AI agents:
 
 | Agent | Responsibility |
 |-------|----------------|
-| **Criteria Extraction Agent** | Analyzes RFP to identify scoring criteria, weights, and evaluation guidance |
-| **Proposal Scoring Agent** | Evaluates each vendor proposal against extracted criteria |
+| **Criteria Extraction Agent** | Analyzes RFP to identify scoring criteria, weights, confidence scores, and evaluation guidance. Auto re-reasons on low-confidence criteria |
+| **Proposal Scoring Agent** | Evaluates each vendor proposal against extracted criteria with confidence scoring. Re-reasons on low-confidence scores |
 | **Comparison Agent** | Compares vendors, generates rankings, and provides recommendations |
+
+### Resilience & Error Handling
+
+| Feature | Description |
+|---------|-------------|
+| **Document Protection Detection** | Encrypted and IRM-protected PDFs/DOCX detected before API calls using `pypdf` and `msoffcrypto-tool` |
+| **AI Refusal Detection** | Automatic retry when models refuse to answer (7 refusal patterns detected) |
+| **Exponential Backoff** | Retry with backoff on transient API failures |
+| **Large Document Chunking** | Token-aware map-reduce splitting for documents exceeding context window |
+| **Non-Proposal Filtering** | Detects and excludes non-proposal documents from scoring |
+| **Corrupt File Handling** | DOCX files that are corrupt or renamed `.doc` files produce clear error messages |
 
 ### Export Options
 
@@ -196,11 +219,13 @@ The following environment variables are configured automatically during Azure de
 | Variable | Description |
 |----------|-------------|
 | `AZURE_OPENAI_ENDPOINT` | Azure OpenAI endpoint URL |
-| `AZURE_OPENAI_DEPLOYMENT_NAME` | Default model deployment name |
+| `AZURE_OPENAI_DEPLOYMENT_NAME` | Default model deployment name (e.g., gpt-5.2) |
 | `AZURE_CONTENT_UNDERSTANDING_ENDPOINT` | Content Understanding endpoint |
 | `AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT` | Document Intelligence endpoint |
 | `AZURE_CLIENT_ID` | Managed identity client ID |
 | `APPLICATIONINSIGHTS_CONNECTION_STRING` | App Insights connection string |
+| `OTEL_LOGGING_ENABLED` | Enable OpenTelemetry logging |
+| `OTEL_TRACING_ENABLED` | Enable distributed tracing |
 
 ### Manual Configuration (Local Development)
 
@@ -209,15 +234,18 @@ For local development, create a `.env` file in the `app` directory:
 ```env
 # Required
 AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
-AZURE_OPENAI_DEPLOYMENT_NAME=gpt-4o-mini
+AZURE_OPENAI_DEPLOYMENT_NAME=gpt-5.2
 
 # Choose one extraction service
 AZURE_CONTENT_UNDERSTANDING_ENDPOINT=https://your-ai-foundry.services.ai.azure.com/
 # OR
 AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT=https://your-doc-intel.cognitiveservices.azure.com/
 
+# Optional: Confidence threshold for re-reasoning (default: 0.7)
+# CONFIDENCE_THRESHOLD=0.7
+
 # Optional: Enable OpenTelemetry logging
-OTEL_LOGGING_ENABLED=false
+# OTEL_LOGGING_ENABLED=true
 ```
 
 ## 🐳 Docker Deployment
@@ -250,7 +278,7 @@ docker build -t rfp-analyzer .
 docker run -p 8501:8501 \
   -e AZURE_CONTENT_UNDERSTANDING_ENDPOINT=your-endpoint \
   -e AZURE_OPENAI_ENDPOINT=your-openai-endpoint \
-  -e AZURE_OPENAI_DEPLOYMENT_NAME=gpt-4o-mini \
+  -e AZURE_OPENAI_DEPLOYMENT_NAME=gpt-5.2 \
   -e AZURE_TENANT_ID=your-tenant-id \
   -e AZURE_CLIENT_ID=your-client-id \
   -e AZURE_CLIENT_SECRET=your-client-secret \
@@ -277,14 +305,23 @@ rfp-analyzer/
 │   ├── docker-compose.yml            # Docker Compose configuration
 │   ├── .env.example                  # Environment template
 │   ├── scoring_guide.md              # Default evaluation criteria
-│   └── services/
-│       ├── document_processor.py     # Document extraction orchestrator
-│       ├── content_understanding_client.py  # Azure Content Understanding
-│       ├── document_intelligence_client.py  # Azure Document Intelligence
-│       ├── scoring_agent_v2.py       # Multi-agent scoring system
-│       ├── comparison_agent.py       # Vendor comparison agent
-│       ├── processing_queue.py       # Async processing queue
-│       └── logging_config.py         # Centralized logging configuration
+│   ├── services/
+│   │   ├── document_processor.py     # Document extraction orchestrator
+│   │   ├── content_understanding_client.py  # Azure Content Understanding
+│   │   ├── document_intelligence_client.py  # Azure Document Intelligence
+│   │   ├── scoring_agent.py          # Multi-agent scoring system with confidence scoring
+│   │   ├── comparison_agent.py       # Vendor comparison agent
+│   │   ├── processing_queue.py       # Async processing queue
+│   │   ├── retry_utils.py            # Retry and refusal detection utilities
+│   │   ├── token_utils.py            # Token estimation and context management
+│   │   ├── telemetry.py              # OpenTelemetry tracing setup
+│   │   ├── utils.py                  # Shared utilities (markdown cleanup, DOCX extraction, protection detection)
+│   │   └── logging_config.py         # Centralized logging configuration
+│   └── ui/
+│       ├── step1_upload.py           # Upload with file type awareness
+│       ├── step2_extract.py          # Extraction with file categorization
+│       ├── step3_criteria.py         # Criteria review with confidence display
+│       └── step4_score.py            # Scoring with confidence and re-reasoning progress
 └── infra/
     ├── main.bicep                    # Main infrastructure template
     ├── main.parameters.json          # Deployment parameters
@@ -312,7 +349,7 @@ Choose between extraction services in the application sidebar:
 ### Model Selection
 
 The application supports multiple Azure OpenAI models:
-- **GPT-5.2**: Latest model with best performance
+- **GPT-5.2**: Latest model with best performance (default)
 - **GPT-4.1**: Strong performance, widely available
 - **GPT-4.1-mini**: Cost-effective for simpler tasks
 
@@ -320,9 +357,11 @@ The application supports multiple Azure OpenAI models:
 
 ### Step 1: Upload Documents
 
-1. Upload your RFP document (PDF, DOCX, PNG, JPG)
+1. Upload your RFP document (PDF, DOCX, TXT, or MD)
 2. Upload one or more vendor proposal documents
 3. Each document will show a preview and file size
+4. File format info shows which files use AI extraction vs direct reading
+5. Protected (encrypted/IRM) documents are detected early with a clear error message
 
 ### Step 2: Extract Content
 
@@ -331,19 +370,27 @@ The application supports multiple Azure OpenAI models:
 3. Wait for processing (progress shown for each document)
 4. Review extracted content in the expandable sections
 
-### Step 3: Evaluate & Compare
+### Step 3: Review Criteria
 
-1. Click "Start Evaluation" to begin AI analysis
+1. Click "Extract Criteria" to analyze the RFP
+2. The AI will identify evaluation criteria and assign weights with confidence scores
+3. Low-confidence criteria are automatically re-analyzed for improved accuracy
+4. Review the extracted criteria, weights, and confidence levels
+5. Confirm or adjust before proceeding to scoring
+
+### Step 4: Score & Compare
+
+1. Click "Score Proposals" to begin AI evaluation
 2. The system will:
-   - Extract evaluation criteria from the RFP
-   - Score each vendor against the criteria
+   - Score each vendor against the criteria with confidence scoring
+   - Automatically re-reason on low-confidence scores
    - Generate a comparative ranking
 3. Review results in the tabbed interface:
    - **Summary**: Overall rankings and recommendations
    - **Individual Reports**: Detailed scores per vendor
    - **Comparison Matrix**: Side-by-side criterion comparison
 
-### Step 4: Export Results
+### Step 5: Export Results
 
 Download results in your preferred format:
 - **CSV**: For spreadsheet analysis
@@ -387,8 +434,12 @@ uv run streamlit run main.py --server.runOnSave true
 | `azure-identity` | Azure authentication |
 | `azure-ai-documentintelligence` | Document Intelligence SDK |
 | `pydantic` | Data validation and models |
-| `python-docx` | Word document generation |
+| `python-docx` | Word document generation and DOCX extraction |
 | `plotly` | Interactive charts |
+| `pypdf` | PDF protection/encryption detection |
+| `msoffcrypto-tool` | DOCX encryption and IRM protection detection |
+| `opentelemetry-*` | Distributed tracing and observability |
+| `azure-monitor-opentelemetry` | Azure Monitor integration |
 
 
 

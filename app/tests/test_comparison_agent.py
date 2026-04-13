@@ -108,6 +108,16 @@ class TestComparisonAgentParse:
         assert result["total_vendors"] == 0
         assert result["vendor_rankings"] == []
 
+    def test_parse_empty_response_raises(self, agent):
+        """Empty model response should raise so retry can kick in."""
+        with pytest.raises(RuntimeError, match="empty response text"):
+            agent._parse_response("")
+
+    def test_parse_none_response_raises(self, agent):
+        """None model response should raise so retry can kick in."""
+        with pytest.raises(RuntimeError, match="empty response text"):
+            agent._parse_response(None)
+
 
 # ============================================================================
 # ComparisonAgent.generate_csv_report tests

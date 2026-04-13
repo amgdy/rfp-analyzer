@@ -36,7 +36,7 @@ echo "Content Understanding Endpoint: $CONTENT_UNDERSTANDING_ENDPOINT"
 
 # Get access token for Azure Cognitive Services
 echo "Obtaining access token..."
-ACCESS_TOKEN=$(az account get-access-token --resource https://cognitiveservices.azure.com --query accessToken -o tsv)
+ACCESS_TOKEN=$(azd auth token --scope https://cognitiveservices.azure.com/.default)
 
 if [ -z "$ACCESS_TOKEN" ]; then
     echo "Error: Failed to obtain access token"

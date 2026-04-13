@@ -97,6 +97,20 @@ class AzureContentUnderstandingClient:
 
         self._headers = self._get_headers(subscription_key, token, x_ms_useragent)
 
+        # Use a persistent session for HTTP connection pooling
+        self._session = requests.Session()
+        self._session.headers.update(self._headers)
+
+    def close(self):
+        """Close the underlying HTTP session to release connections."""
+        self._session.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()
+
     def _get_analyzer_url(
         self, endpoint: str, api_version: str, analyzer_id: str
     ) -> str:
@@ -199,8 +213,10 @@ class AzureContentUnderstandingClient:
                     if "innererror" in error_info:
                         error_detail += f"\n  Inner Error: {error_info['innererror']}"
                 else:
+                    # Truncate response body to avoid leaking sensitive data
+                    body_preview = json.dumps(error_json, indent=2)[:200]
                     error_detail = (
-                        f"\n  Response Body: {json.dumps(error_json, indent=2)}"
+                        f"\n  Response Body (truncated): {body_preview}"
                     )
             except (ValueError, json.JSONDecodeError):
                 # If response is not JSON, include raw text
@@ -348,7 +364,7 @@ class AzureContentUnderstandingClient:
                     f"This likely indicates a pagination loop or misconfiguration."
                 )
 
-            response = requests.get(url=url, headers=self._headers)
+            response = self._session.get(url=url, headers=self._headers)
             self._raise_for_status_with_detail(response)
             response_json = response.json()
 
@@ -387,7 +403,7 @@ class AzureContentUnderstandingClient:
         Raises:
             requests.exceptions.HTTPError: If the HTTP request returned an unsuccessful status code.
         """
-        response = requests.get(
+        response = self._session.get(
             url=self._get_defaults_url(self._endpoint, self._api_version),
             headers=self._headers,
         )
@@ -430,7 +446,7 @@ class AzureContentUnderstandingClient:
 
         body = {"modelDeployments": model_deployments}
 
-        response = requests.patch(
+        response = self._session.patch(
             url=self._get_defaults_url(self._endpoint, self._api_version),
             headers=headers,
             json=body,
@@ -452,7 +468,7 @@ class AzureContentUnderstandingClient:
         Raises:
             HTTPError: If the request fails.
         """
-        response = requests.get(
+        response = self._session.get(
             url=self._get_analyzer_url(self._endpoint, self._api_version, analyzer_id),
             headers=self._headers,
         )
@@ -520,7 +536,7 @@ class AzureContentUnderstandingClient:
         headers = {"Content-Type": "application/json"}
         headers.update(self._headers)
 
-        response = requests.put(
+        response = self._session.put(
             url=self._get_analyzer_url(self._endpoint, self._api_version, analyzer_id),
             headers=headers,
             json=analyzer_template,
@@ -542,7 +558,7 @@ class AzureContentUnderstandingClient:
         Raises:
             HTTPError: If the delete request fails.
         """
-        response = requests.delete(
+        response = self._session.delete(
             url=self._get_analyzer_url(self._endpoint, self._api_version, analyzer_id),
             headers=self._headers,
         )
@@ -574,7 +590,7 @@ class AzureContentUnderstandingClient:
         headers = {"Content-Type": "application/json"}
         headers.update(self._headers)
 
-        response = requests.post(
+        response = self._session.post(
             url=self._get_analyze_url(self._endpoint, self._api_version, analyzer_id),
             headers=headers,
             json=data,
@@ -604,7 +620,7 @@ class AzureContentUnderstandingClient:
         headers = {"Content-Type": "application/octet-stream"}
         headers.update(self._headers)
 
-        response = requests.post(
+        response = self._session.post(
             url=self._get_analyze_binary_url(
                 self._endpoint, self._api_version, analyzer_id
             ),
@@ -642,7 +658,7 @@ class AzureContentUnderstandingClient:
         headers = {"Content-Type": "application/octet-stream"}
         headers.update(self._headers)
 
-        response = requests.post(
+        response = self._session.post(
             url=self._get_analyze_binary_url(
                 self._endpoint, self._api_version, analyzer_id
             ),
@@ -958,11 +974,11 @@ class AzureContentUnderstandingClient:
         # Construct file retrieval URL according to TypeSpec: /analyzerResults/{operationId}/files/{+path}
         file_retrieval_url = f"{self._endpoint}/contentunderstanding/analyzerResults/{operation_id}/files/{file_id}?api-version={self._api_version}"
         try:
-            response = requests.get(url=file_retrieval_url, headers=self._headers)
+            response = self._session.get(url=file_retrieval_url, headers=self._headers)
             self._raise_for_status_with_detail(response)
             return response.content
         except requests.exceptions.RequestException as e:
-            print(f"HTTP request failed: {e}")
+            self._logger.error("HTTP request failed while retrieving file: %s", e)
             return None
 
     def begin_create_classifier(
@@ -993,7 +1009,7 @@ class AzureContentUnderstandingClient:
         headers = {"Content-Type": "application/json"}
         headers.update(self._headers)
 
-        response = requests.put(
+        response = self._session.put(
             url=self._get_classifier_url(
                 self._endpoint, self._api_version, classifier_id
             ),
@@ -1032,7 +1048,7 @@ class AzureContentUnderstandingClient:
 
         headers.update(self._headers)
         if isinstance(data, dict):
-            response = requests.post(
+            response = self._session.post(
                 url=self._get_classify_url(
                     self._endpoint, self._api_version, classifier_id
                 ),
@@ -1040,7 +1056,7 @@ class AzureContentUnderstandingClient:
                 json=data,
             )
         else:
-            response = requests.post(
+            response = self._session.post(
                 url=self._get_classify_url(
                     self._endpoint, self._api_version, classifier_id
                 ),
@@ -1091,7 +1107,7 @@ class AzureContentUnderstandingClient:
                     f"Operation timed out after {timeout_seconds:.2f} seconds."
                 )
 
-            response = requests.get(operation_location, headers=self._headers)
+            response = self._session.get(operation_location, headers=self._headers)
             self._raise_for_status_with_detail(response)
             status = response.json().get("status").lower()
             if status == "succeeded":

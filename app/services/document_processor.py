@@ -20,6 +20,8 @@ from dotenv import load_dotenv
 from .content_understanding_client import AzureContentUnderstandingClient
 from .document_intelligence_client import AzureDocumentIntelligenceClient
 from .logging_config import get_logger
+from .token_utils import estimate_token_count
+from .utils import clean_extracted_markdown, extract_docx_as_markdown, check_document_protection
 
 load_dotenv()
 
@@ -32,6 +34,32 @@ class ExtractionService(str, Enum):
 
     CONTENT_UNDERSTANDING = "content_understanding"
     DOCUMENT_INTELLIGENCE = "document_intelligence"
+
+
+# Extensions that need local extraction because DI does not support them.
+# Note: only .docx (Office Open XML) is supported by python-docx.
+# Old binary .doc files are NOT supported and will be sent to DI as-is
+# (DI will reject them with an InvalidContent error — users must convert
+# to .docx or .pdf first).
+_DOCX_EXTENSIONS = ("docx",)
+
+# ── File-type classification constants ──────────────────────────────────
+# Text-based formats are decoded directly as UTF-8 — no AI extraction needed.
+TEXT_EXTENSIONS = ("txt", "md")
+# Binary / structured formats require AI extraction (Azure AI services or local DOCX).
+AI_EXTRACTED_EXTENSIONS = ("pdf", "docx")
+
+
+def requires_ai_extraction(filename: str) -> bool:
+    """Return *True* if the file needs AI-based content extraction.
+
+    Text files (``.txt``, ``.md``) are read directly as UTF-8, so they skip
+    the extraction step.  Binary / structured formats (``.pdf``, ``.docx``)
+    require Azure AI services (Content Understanding or Document Intelligence)
+    or local DOCX conversion.
+    """
+    extension = filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
+    return extension not in TEXT_EXTENSIONS
 
 
 class DocumentProcessor:
@@ -149,6 +177,45 @@ class DocumentProcessor:
             )
             return content
 
+        # ── Protection / encryption check ──────────────────────────────────
+        # Detect password-protected or IRM-protected PDFs and DOCX files
+        # *before* sending them to an extraction service.  This gives the
+        # user a clear, actionable error instead of a cryptic API failure.
+        check_document_protection(file_bytes, filename)
+
+        # Handle DOCX files locally using python-docx when
+        # Document Intelligence is selected (DI does not accept DOCX).
+        # Content Understanding supports DOCX natively, so no conversion
+        # is needed on that path.
+        if extension in _DOCX_EXTENSIONS and self.service == ExtractionService.DOCUMENT_INTELLIGENCE:
+            logger.info(
+                "[REQ:%s] Converting DOCX to markdown locally (DI does not support DOCX)...",
+                request_id,
+            )
+            try:
+                content = await asyncio.to_thread(extract_docx_as_markdown, file_bytes)
+            except ValueError:
+                # The file has a .docx extension but is not a valid Office
+                # Open XML document (e.g. old binary .doc renamed to .docx,
+                # corrupted archive, or non-ZIP data).
+                logger.error(
+                    "[REQ:%s] Local DOCX extraction failed for %s — "
+                    "file is not a valid DOCX document",
+                    request_id,
+                    filename,
+                )
+                raise
+            duration = time.time() - extract_start
+            content_tokens = estimate_token_count(content)
+            logger.info(
+                "[REQ:%s] ✅ DOCX extraction completed in %.3fs (%d chars, ~%d tokens)",
+                request_id,
+                duration,
+                len(content),
+                content_tokens,
+            )
+            return content
+
         # Use the configured extraction service
         if self.service == ExtractionService.CONTENT_UNDERSTANDING:
             logger.info(
@@ -170,11 +237,13 @@ class DocumentProcessor:
             )
 
         duration = time.time() - extract_start
+        content_tokens = estimate_token_count(content)
         logger.info(
-            "[REQ:%s] ✅ Document extraction completed in %.3fs (%d chars)",
+            "[REQ:%s] ✅ Document extraction completed in %.3fs (%d chars, ~%d tokens)",
             request_id,
             duration,
             len(content),
+            content_tokens,
         )
         return content
 
@@ -219,6 +288,10 @@ class DocumentProcessor:
         if contents:
             content = contents[0]
             markdown = content.get("markdown", "")
+
+            # Clean up the raw markdown for better readability
+            markdown = clean_extracted_markdown(markdown)
+
             parse_duration = time.time() - parse_start
             analyze_duration = time.time() - analyze_start
             logger.info(

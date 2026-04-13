@@ -22,7 +22,7 @@ rfp-analyzer/
 ├── app/                    # Main application
 │   ├── main.py             # Streamlit entry point
 │   ├── services/           # Core services and agents
-│   │   ├── scoring_agent_v2.py      # Multi-agent scoring system
+│   │   ├── scoring_agent.py       # Multi-agent scoring system
 │   │   ├── comparison_agent.py      # Vendor comparison agent
 │   │   ├── document_processor.py    # Document processing orchestrator
 │   │   ├── content_understanding_client.py  # Azure Content Understanding
@@ -160,7 +160,7 @@ azd provision --preview
 
 ### Adding a New Agent
 1. Create new file in `app/services/`
-2. Follow pattern in `scoring_agent_v2.py`
+2. Follow pattern in `scoring_agent.py`
 3. Register with document processor if needed
 4. Update `__init__.py` exports
 

@@ -99,7 +99,7 @@ def render_landing_page():
     st.markdown("")
     st.divider()
 
-    # How it works — 3-step visual timeline
+    # How it works — 4-step visual timeline
     st.markdown("### How It Works")
     st.markdown("")
 
@@ -127,9 +127,9 @@ def render_landing_page():
         <div style="{step_style}">
             <div style="{circle_style}">2</div>
             <div>
-                <strong>Configure &amp; Extract</strong>
+                <strong>Extract Content</strong>
                 <p style="color:#6B7280;margin:2px 0 0 0;">
-                    Select extraction settings and let AI parse your documents.
+                    AI extracts text from your documents using Azure AI services.
                 </p>
             </div>
         </div>
@@ -137,9 +137,19 @@ def render_landing_page():
         <div style="{step_style}">
             <div style="{circle_style}">3</div>
             <div>
-                <strong>Evaluate &amp; Compare</strong>
+                <strong>Review Criteria</strong>
                 <p style="color:#6B7280;margin:2px 0 0 0;">
-                    AI scores each proposal and generates a comparative report.
+                    AI extracts evaluation criteria from the RFP. Review weights and scoring guidance before proceeding.
+                </p>
+            </div>
+        </div>
+        <div style="width:2px;height:20px;background:#E5E7EB;margin:0 0 12px 19px;"></div>
+        <div style="{step_style}">
+            <div style="{circle_style}">4</div>
+            <div>
+                <strong>Score &amp; Compare</strong>
+                <p style="color:#6B7280;margin:2px 0 0 0;">
+                    AI scores each proposal against the criteria and generates a comparative report.
                 </p>
             </div>
         </div>

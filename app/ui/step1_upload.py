@@ -7,6 +7,9 @@ from ui.components import render_step_indicator
 
 logger = get_logger(__name__)
 
+# Maximum file size: 500 MB per file
+_MAX_FILE_SIZE_BYTES = 500 * 1024 * 1024
+
 
 def render_step1():
     """Step 1: Upload RFP and Vendor Proposals."""
@@ -23,19 +26,22 @@ def render_step1():
 
         rfp_file = st.file_uploader(
             "Choose RFP file",
-            type=["pdf", "docx", "doc", "txt", "md"],
+            type=["pdf", "docx", "txt", "md"],
             key="rfp_uploader",
-            help="Supported formats: PDF, Word documents, Text files, Markdown"
+            help="PDF & DOCX → extracted via AI  |  TXT & MD → read directly (instant)"
         )
 
         if rfp_file is not None:
-            st.info(f"📎 **{rfp_file.name}** ({rfp_file.size / 1024:.1f} KB)")
-            if st.session_state.rfp_file is None or st.session_state.rfp_file.get('name') != rfp_file.name:
-                logger.info("RFP file uploaded: %s (%.1f KB)", rfp_file.name, rfp_file.size / 1024)
-            st.session_state.rfp_file = {
-                "bytes": rfp_file.getvalue(),
-                "name": rfp_file.name
-            }
+            if rfp_file.size > _MAX_FILE_SIZE_BYTES:
+                st.error(f"⚠️ File **{rfp_file.name}** exceeds the 500 MB size limit.")
+            else:
+                st.info(f"📎 **{rfp_file.name}** ({rfp_file.size / 1024:.1f} KB)")
+                if st.session_state.rfp_file is None or st.session_state.rfp_file.get('name') != rfp_file.name:
+                    logger.info("RFP file uploaded: %s (%.1f KB)", rfp_file.name, rfp_file.size / 1024)
+                st.session_state.rfp_file = {
+                    "bytes": rfp_file.getvalue(),
+                    "name": rfp_file.name
+                }
 
         if st.session_state.rfp_file:
             st.success(f"✅ RFP ready: {st.session_state.rfp_file['name']}")
@@ -46,32 +52,55 @@ def render_step1():
 
         proposal_files = st.file_uploader(
             "Choose Vendor Proposal files",
-            type=["pdf", "docx", "doc", "txt", "md"],
+            type=["pdf", "docx", "txt", "md"],
             key="proposals_uploader",
             accept_multiple_files=True,
-            help="Supported formats: PDF, Word documents, Text files, Markdown"
+            help="PDF & DOCX → extracted via AI  |  TXT & MD → read directly (instant)"
         )
 
         if proposal_files:
-            st.info(f"📎 {len(proposal_files)} file(s) selected")
-            for f in proposal_files:
-                st.caption(f"• {f.name} ({f.size / 1024:.1f} KB)")
+            oversized = [f for f in proposal_files if f.size > _MAX_FILE_SIZE_BYTES]
+            if oversized:
+                for f in oversized:
+                    st.error(f"⚠️ File **{f.name}** exceeds the 500 MB size limit.")
+            valid_files = [f for f in proposal_files if f.size <= _MAX_FILE_SIZE_BYTES]
 
-            # Log new uploads
-            current_names = {p.get('name') for p in st.session_state.proposal_files} if st.session_state.proposal_files else set()
-            new_names = {f.name for f in proposal_files}
-            if current_names != new_names:
-                logger.info("Proposal files uploaded: %d files - %s",
-                           len(proposal_files),
-                           ", ".join(f.name for f in proposal_files))
+            if valid_files:
+                st.info(f"📎 {len(valid_files)} file(s) selected")
+                for f in valid_files:
+                    st.caption(f"• {f.name} ({f.size / 1024:.1f} KB)")
 
-            st.session_state.proposal_files = [
-                {"bytes": f.getvalue(), "name": f.name}
-                for f in proposal_files
-            ]
+                # Log new uploads
+                current_names = {p.get('name') for p in st.session_state.proposal_files} if st.session_state.proposal_files else set()
+                new_names = {f.name for f in valid_files}
+                if current_names != new_names:
+                    logger.info("Proposal files uploaded: %d files - %s",
+                               len(valid_files),
+                               ", ".join(f.name for f in valid_files))
+
+                st.session_state.proposal_files = [
+                    {"bytes": f.getvalue(), "name": f.name}
+                    for f in valid_files
+                ]
 
         if st.session_state.proposal_files:
             st.success(f"✅ {len(st.session_state.proposal_files)} proposal(s) ready")
+
+    # File type processing info
+    with st.expander("ℹ️ How different file formats are processed", expanded=False):
+        st.markdown(
+            "| Format | Processing | Speed |\n"
+            "|--------|-----------|-------|\n"
+            "| **PDF** | AI extraction (Content Understanding / Document Intelligence) | ~10-30s |\n"
+            "| **DOCX** | AI extraction or local conversion | ~5-20s |\n"
+            "| **TXT** | Read directly — no extraction needed | Instant |\n"
+            "| **MD** | Read directly — no extraction needed | Instant |"
+        )
+        st.info(
+            "🔒 **Protected documents are not supported.** If your PDF or DOCX is "
+            "password-protected or IRM-protected, please remove the protection "
+            "before uploading."
+        )
 
     st.markdown("---")
 

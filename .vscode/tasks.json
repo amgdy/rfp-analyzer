@@ -1,0 +1,27 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "start-aspire-dashboard",
+            "type": "shell",
+            "command": "docker stop aspire-dashboard 2>/dev/null; docker rm -f aspire-dashboard 2>/dev/null; docker run --rm -d --name aspire-dashboard -p 18888:18888 -p 4317:18889 -p 4318:18890 -e DASHBOARD__FRONTEND__AUTHMODE=Unsecured mcr.microsoft.com/dotnet/aspire-dashboard:latest && echo 'Aspire Dashboard started — UI: http://localhost:18888  OTLP gRPC: localhost:4317  OTLP HTTP: localhost:4318'",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "detail": "Starts Aspire Dashboard in Docker (UI: http://localhost:18888, OTLP gRPC: localhost:4317, OTLP HTTP: localhost:4318). Stops any existing instance first. Requires Docker."
+        },
+        {
+            "label": "stop-aspire-dashboard",
+            "type": "shell",
+            "command": "docker stop aspire-dashboard 2>/dev/null && echo 'Aspire Dashboard stopped' || echo 'Aspire Dashboard was not running'",
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "silent",
+                "panel": "shared"
+            },
+            "detail": "Stops the Aspire Dashboard Docker container."
+        }
+    ]
+}

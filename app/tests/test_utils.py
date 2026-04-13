@@ -1,9 +1,16 @@
 """Tests for services.utils module."""
 
+import io
 import json
 import pytest
 
-from services.utils import parse_json_response, format_duration
+from services.utils import (
+    parse_json_response,
+    format_duration,
+    clean_extracted_text,
+    clean_extracted_markdown,
+    check_document_protection,
+)
 
 
 # ============================================================================
@@ -43,6 +50,21 @@ class TestParseJsonResponse:
         """Raise JSONDecodeError on malformed content."""
         with pytest.raises(json.JSONDecodeError):
             parse_json_response("not json at all")
+
+    def test_empty_string_raises(self):
+        """Raise JSONDecodeError on empty string."""
+        with pytest.raises(json.JSONDecodeError, match="Empty response text"):
+            parse_json_response("")
+
+    def test_none_raises(self):
+        """Raise JSONDecodeError on None input."""
+        with pytest.raises(json.JSONDecodeError, match="Empty response text"):
+            parse_json_response(None)
+
+    def test_whitespace_only_raises(self):
+        """Raise JSONDecodeError on whitespace-only string."""
+        with pytest.raises(json.JSONDecodeError, match="Empty response text"):
+            parse_json_response("   \n  ")
 
     def test_empty_json_object(self):
         """Parse an empty JSON object."""
@@ -131,3 +153,348 @@ class TestFormatDuration:
         """Negative durations should still format (edge case)."""
         result = format_duration(-5.0)
         assert result == "-5.0s"
+
+
+# ============================================================================
+# clean_extracted_text tests
+# ============================================================================
+
+class TestCleanExtractedText:
+    """Tests for the clean_extracted_text helper."""
+
+    def test_empty_string(self):
+        assert clean_extracted_text("") == ""
+
+    def test_plain_text_unchanged(self):
+        text = "This is plain text."
+        assert clean_extracted_text(text) == text
+
+    def test_strips_html_tags(self):
+        assert clean_extracted_text("<p>Hello</p>") == "Hello"
+
+    def test_strips_nested_html(self):
+        result = clean_extracted_text("<div><span>Content</span></div>")
+        assert result == "Content"
+
+    def test_strips_html_entities(self):
+        result = clean_extracted_text("A&amp;B &lt; C")
+        assert "&amp;" not in result
+        assert "&lt;" not in result
+        assert "A" in result
+
+    def test_strips_numeric_entities(self):
+        result = clean_extracted_text("Hello&#160;World")
+        assert "&#160;" not in result
+
+    def test_strips_xml_processing_instructions(self):
+        result = clean_extracted_text('<?xml version="1.0"?>Hello')
+        assert "<?xml" not in result
+        assert "Hello" in result
+
+    def test_strips_noisy_image_refs(self):
+        result = clean_extracted_text("Before ![image](http://example.com/img.png) After")
+        assert "![image]" not in result
+        assert "Before" in result
+        assert "After" in result
+
+    def test_strips_base64_data_uris(self):
+        result = clean_extracted_text("Image: data:image/png;base64,iVBOR... end")
+        assert "data:image" not in result
+
+    def test_collapses_excessive_whitespace(self):
+        result = clean_extracted_text("word1    word2\t\tword3")
+        assert "word1 word2 word3" == result
+
+    def test_collapses_excessive_newlines(self):
+        result = clean_extracted_text("para1\n\n\n\n\npara2")
+        assert result == "para1\n\npara2"
+
+    def test_strips_line_whitespace(self):
+        result = clean_extracted_text("  leading   \n   trailing  ")
+        assert result == "leading\ntrailing"
+
+    def test_combined_cleanup(self):
+        messy = "<p>Hello &amp; welcome</p>\n\n\n\n<br/>Goodbye"
+        result = clean_extracted_text(messy)
+        assert "<p>" not in result
+        assert "<br/>" not in result
+        assert "&amp;" not in result
+        assert "Hello" in result
+        assert "Goodbye" in result
+
+
+# ============================================================================
+# clean_extracted_markdown tests
+# ============================================================================
+
+
+class TestCleanExtractedMarkdown:
+    """Tests for clean_extracted_markdown utility."""
+
+    def test_empty_string(self):
+        assert clean_extracted_markdown("") == ""
+
+    def test_none_returns_empty(self):
+        assert clean_extracted_markdown(None) == ""
+
+    def test_collapses_excessive_blank_lines(self):
+        text = "Line 1\n\n\n\n\n\nLine 2"
+        result = clean_extracted_markdown(text)
+        assert "\n\n\n\n" not in result
+        assert "Line 1" in result and "Line 2" in result
+
+    def test_ensures_blank_line_before_header(self):
+        text = "Some paragraph text\n# Header"
+        result = clean_extracted_markdown(text)
+        assert "\n\n# Header" in result
+
+    def test_normalises_non_breaking_spaces(self):
+        text = "Hello\u00a0World"
+        result = clean_extracted_markdown(text)
+        assert "\u00a0" not in result
+        assert "Hello World" in result
+
+    def test_strips_trailing_whitespace(self):
+        text = "Line 1   \nLine 2  "
+        result = clean_extracted_markdown(text)
+        for line in result.split("\n"):
+            assert line == line.rstrip()
+
+    def test_preserves_markdown_formatting(self):
+        text = "# Header\n\n**bold** and *italic*\n\n| col1 | col2 |\n|---|---|\n| a | b |"
+        result = clean_extracted_markdown(text)
+        assert "# Header" in result
+        assert "**bold**" in result
+        assert "| col1 | col2 |" in result
+
+
+# ============================================================================
+# extract_docx_as_markdown tests
+# ============================================================================
+
+
+class TestExtractDocxAsMarkdown:
+    """Tests for the extract_docx_as_markdown helper."""
+
+    @staticmethod
+    def _make_docx(paragraphs=None, tables=None):
+        """Build a minimal DOCX in memory and return its bytes.
+
+        Args:
+            paragraphs: list of (text, style_name) tuples.
+                        style_name can be "Normal", "Heading 1", etc.
+            tables: list of row-lists, e.g. [["H1","H2"],["a","b"]]
+        """
+        from docx import Document
+        import io
+
+        doc = Document()
+
+        if paragraphs:
+            for text, style in paragraphs:
+                doc.add_paragraph(text, style=style)
+
+        if tables:
+            rows = len(tables)
+            cols = len(tables[0]) if tables else 0
+            tbl = doc.add_table(rows=rows, cols=cols)
+            for r_idx, row_data in enumerate(tables):
+                for c_idx, cell_text in enumerate(row_data):
+                    tbl.rows[r_idx].cells[c_idx].text = cell_text
+
+        buf = io.BytesIO()
+        doc.save(buf)
+        return buf.getvalue()
+
+    def test_basic_paragraphs(self):
+        """Extract plain paragraphs as markdown text."""
+        from services.utils import extract_docx_as_markdown
+
+        docx_bytes = self._make_docx(
+            paragraphs=[
+                ("Hello World", "Normal"),
+                ("Second paragraph", "Normal"),
+            ]
+        )
+        result = extract_docx_as_markdown(docx_bytes)
+        assert "Hello World" in result
+        assert "Second paragraph" in result
+
+    def test_heading_extraction(self):
+        """Headings should become markdown headers."""
+        from services.utils import extract_docx_as_markdown
+
+        docx_bytes = self._make_docx(
+            paragraphs=[
+                ("Main Title", "Heading 1"),
+                ("Sub Section", "Heading 2"),
+                ("Body text", "Normal"),
+            ]
+        )
+        result = extract_docx_as_markdown(docx_bytes)
+        assert "# Main Title" in result
+        assert "## Sub Section" in result
+        assert "Body text" in result
+
+    def test_table_extraction(self):
+        """Tables should become markdown tables."""
+        from services.utils import extract_docx_as_markdown
+
+        docx_bytes = self._make_docx(
+            tables=[
+                ["Name", "Score"],
+                ["Vendor A", "85"],
+                ["Vendor B", "72"],
+            ]
+        )
+        result = extract_docx_as_markdown(docx_bytes)
+        assert "| Name | Score |" in result
+        assert "| --- | --- |" in result
+        assert "| Vendor A | 85 |" in result
+        assert "| Vendor B | 72 |" in result
+
+    def test_empty_document(self):
+        """An empty DOCX should return an empty string."""
+        from services.utils import extract_docx_as_markdown
+
+        docx_bytes = self._make_docx()
+        result = extract_docx_as_markdown(docx_bytes)
+        assert result == ""
+
+    def test_mixed_content(self):
+        """A DOCX with headings, paragraphs, and tables."""
+        from services.utils import extract_docx_as_markdown
+
+        docx_bytes = self._make_docx(
+            paragraphs=[
+                ("Report Title", "Heading 1"),
+                ("This is the intro.", "Normal"),
+            ],
+            tables=[
+                ["Criterion", "Weight"],
+                ["Cost", "30%"],
+            ],
+        )
+        result = extract_docx_as_markdown(docx_bytes)
+        assert "# Report Title" in result
+        assert "This is the intro." in result
+        assert "| Criterion | Weight |" in result
+        assert "| Cost | 30% |" in result
+
+    def test_invalid_bytes_raises_valueerror(self):
+        """Non-DOCX bytes should raise a ValueError with a helpful message."""
+        from services.utils import extract_docx_as_markdown
+
+        with pytest.raises(ValueError, match="not a valid DOCX document"):
+            extract_docx_as_markdown(b"not a docx file")
+
+    def test_old_doc_binary_raises_valueerror(self):
+        """An old binary .doc file (non-ZIP) should raise ValueError."""
+        from services.utils import extract_docx_as_markdown
+
+        # Old .doc files start with the OLE2 compound file magic bytes
+        ole2_header = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\x00" * 100
+        with pytest.raises(ValueError, match="not a valid DOCX"):
+            extract_docx_as_markdown(ole2_header)
+
+
+# ============================================================================
+# check_document_protection tests
+# ============================================================================
+
+
+class TestCheckDocumentProtection:
+    """Tests for the check_document_protection helper."""
+
+    # ── PDF tests ───────────────────────────────────────────────────────
+
+    def test_unprotected_pdf_passes(self):
+        """A minimal valid, unprotected PDF should not raise."""
+        # Minimal valid PDF that pypdf can parse
+        pdf_bytes = (
+            b"%PDF-1.0\n"
+            b"1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
+            b"2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n"
+            b"3 0 obj<</Type/Page/MediaBox[0 0 612 792]/Parent 2 0 R>>endobj\n"
+            b"xref\n0 4\n"
+            b"0000000000 65535 f \n"
+            b"0000000009 00000 n \n"
+            b"0000000058 00000 n \n"
+            b"0000000115 00000 n \n"
+            b"trailer<</Size 4/Root 1 0 R>>\n"
+            b"startxref\n183\n%%EOF"
+        )
+        # Should not raise
+        check_document_protection(pdf_bytes, "test.pdf")
+
+    def test_encrypted_pdf_raises(self):
+        """A password-encrypted PDF should raise ValueError."""
+        from pypdf import PdfWriter
+
+        writer = PdfWriter()
+        writer.add_blank_page(width=612, height=792)
+        writer.encrypt("secret")
+
+        buf = io.BytesIO()
+        writer.write(buf)
+        encrypted_pdf = buf.getvalue()
+
+        with pytest.raises(ValueError, match="protected"):
+            check_document_protection(encrypted_pdf, "protected.pdf")
+
+    def test_non_pdf_bytes_no_error(self):
+        """Garbage bytes with a .pdf extension should not raise from the check."""
+        # pypdf will fail to parse — we let downstream handle it
+        check_document_protection(b"not a pdf", "bad.pdf")
+
+    # ── DOCX tests ──────────────────────────────────────────────────────
+
+    def test_unprotected_docx_passes(self):
+        """A normal DOCX file should not raise."""
+        from docx import Document as DocxDocument
+
+        doc = DocxDocument()
+        doc.add_paragraph("Hello")
+        buf = io.BytesIO()
+        doc.save(buf)
+
+        check_document_protection(buf.getvalue(), "normal.docx")
+
+    def test_encrypted_docx_raises(self):
+        """An encrypted DOCX (OLE container with EncryptionInfo) should raise."""
+        import msoffcrypto
+        from docx import Document as DocxDocument
+
+        # Create a normal DOCX
+        doc = DocxDocument()
+        doc.add_paragraph("Confidential")
+        plain_buf = io.BytesIO()
+        doc.save(plain_buf)
+        plain_buf.seek(0)
+
+        # Encrypt it
+        encrypted_buf = io.BytesIO()
+        office_file = msoffcrypto.OfficeFile(plain_buf)
+        office_file.load_key(password="secret")
+        office_file.encrypt("secret", encrypted_buf)
+
+        with pytest.raises(ValueError, match="protected"):
+            check_document_protection(encrypted_buf.getvalue(), "encrypted.docx")
+
+    def test_non_docx_bytes_no_error(self):
+        """Garbage bytes with a .docx extension should not raise from the check."""
+        check_document_protection(b"not a docx", "bad.docx")
+
+    # ── Other formats (no-op) ───────────────────────────────────────────
+
+    def test_txt_file_skipped(self):
+        """TXT files should not be checked."""
+        check_document_protection(b"hello world", "notes.txt")
+
+    def test_md_file_skipped(self):
+        """Markdown files should not be checked."""
+        check_document_protection(b"# heading", "readme.md")
+
+    def test_unknown_extension_skipped(self):
+        """Unknown extensions should not be checked."""
+        check_document_protection(b"\x00\x01\x02", "data.xyz")

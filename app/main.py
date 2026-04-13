@@ -3,8 +3,9 @@ RFP Analyzer - Streamlit Application
 
 A comprehensive workflow for analyzing RFPs and scoring vendor proposals:
 1. Upload RFP file and Vendor proposals (multiple files)
-2. Configure extraction service and evaluation criteria
-3. AI-powered evaluation and multi-vendor comparison
+2. Extract document content using Azure AI services
+3. Review AI-extracted evaluation criteria
+4. AI-powered proposal scoring and multi-vendor comparison
 """
 
 import streamlit as st
@@ -15,20 +16,29 @@ from services.logging_config import setup_logging, get_logger
 
 setup_logging()  # Uses OTEL_LOGGING_ENABLED env var (default: False)
 
+# Initialize OpenTelemetry tracing (after logging)
+from services.telemetry import setup_telemetry, _get_app_version
+
+setup_telemetry()
+
 from services.document_processor import ExtractionService
 
 # Import UI modules
 from ui.landing import render_landing_page
 from ui.step1_upload import render_step1
 from ui.step2_extract import render_step2
-from ui.step3_evaluate import render_step3
+from ui.step3_criteria import render_step3
+from ui.step4_score import render_step4
 from ui.components import render_sidebar
 
 # Get logger (logging is already configured at import time)
 logger = get_logger(__name__)
 
+# Application version (single source of truth: pyproject.toml)
+APP_VERSION = _get_app_version()
+
 # Log application startup
-logger.info("RFP Analyzer application starting...")
+logger.info("RFP Analyzer v%s starting...", APP_VERSION)
 
 
 def get_scoring_guide() -> str:
@@ -60,8 +70,12 @@ if "proposal_contents" not in st.session_state:
     st.session_state.proposal_contents = {}
 if "evaluation_results" not in st.session_state:
     st.session_state.evaluation_results = []
+if "disqualified_results" not in st.session_state:
+    st.session_state.disqualified_results = []
 if "comparison_results" not in st.session_state:
     st.session_state.comparison_results = None
+if "extracted_criteria" not in st.session_state:
+    st.session_state.extracted_criteria = None
 if "step_durations" not in st.session_state:
     st.session_state.step_durations = {}
 if "extraction_service" not in st.session_state:
@@ -93,6 +107,8 @@ def main():
         render_step2()
     elif st.session_state.step == 3:
         render_step3()
+    elif st.session_state.step == 4:
+        render_step4()
 
 
 if __name__ == "__main__":

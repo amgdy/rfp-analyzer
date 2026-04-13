@@ -23,6 +23,8 @@ from azure.identity import DefaultAzureCredential
 from dotenv import load_dotenv
 
 from .logging_config import get_logger
+from .token_utils import estimate_token_count
+from .utils import clean_extracted_markdown
 
 load_dotenv()
 
@@ -85,11 +87,15 @@ class AzureDocumentIntelligenceClient:
     # Maximum file size in bytes (500 MB for standard tier)
     MAX_FILE_SIZE_BYTES = 500 * 1024 * 1024  # 500 MB
 
+    # Maximum page count for prebuilt-layout model
+    MAX_PAGE_COUNT = 2000
+
     def analyze_document(
         self,
         file_bytes: bytes,
         request_id: str = "unknown",
         include_figures: bool = True,
+        pages: str = None,
     ) -> str:
         """
         Analyze a document and return content as markdown.
@@ -98,6 +104,8 @@ class AzureDocumentIntelligenceClient:
             file_bytes: The document content as bytes
             request_id: Unique request ID for logging correlation
             include_figures: Whether to include figure/image analysis
+            pages: Optional page range to analyze (e.g., "1-100", "1-50,55-100").
+                   If None, all pages are analyzed (up to 2000 pages).
 
         Returns:
             Extracted content as markdown string
@@ -110,9 +118,10 @@ class AzureDocumentIntelligenceClient:
         # Check file size before sending
         file_size_mb = len(file_bytes) / (1024 * 1024)
         logger.info(
-            "[REQ:%s] Starting Document Intelligence analysis (file size: %.2f MB)...",
+            "[REQ:%s] Starting Document Intelligence analysis (file size: %.2f MB, pages: %s)...",
             request_id,
             file_size_mb,
+            pages or "all",
         )
 
         if len(file_bytes) > self.MAX_FILE_SIZE_BYTES:
@@ -127,37 +136,58 @@ class AzureDocumentIntelligenceClient:
             # Include FIGURES output option to enable figure extraction with cropped images
             output_options = [AnalyzeOutputOption.FIGURES] if include_figures else None
 
-            poller = self.client.begin_analyze_document(
-                model_id="prebuilt-layout",
-                body=file_bytes,
-                content_type="application/octet-stream",
-                output_content_format=DocumentContentFormat.MARKDOWN,
-                output=output_options,
-            )
+            # Build keyword arguments — include pages only when specified
+            analyze_kwargs = {
+                "model_id": "prebuilt-layout",
+                "body": file_bytes,
+                "content_type": "application/octet-stream",
+                "output_content_format": DocumentContentFormat.MARKDOWN,
+                "output": output_options,
+            }
+            if pages:
+                analyze_kwargs["pages"] = pages
+                logger.info("[REQ:%s] Analyzing specific pages: %s", request_id, pages)
+
+            poller = self.client.begin_analyze_document(**analyze_kwargs)
 
             logger.info(
-                "[REQ:%s] Document analysis started, waiting for result...", request_id
+                "[REQ:%s] Document analysis started, waiting for result "
+                "(large documents may take several minutes)...",
+                request_id,
             )
 
             result: AnalyzeResult = poller.result()
             operation_id = poller.details.get("operation_id")
 
             analyze_duration = time.time() - analyze_start
+
+            # Log page count for large document awareness
+            page_count = len(result.pages) if hasattr(result, "pages") and result.pages else 0
             logger.info(
-                "[REQ:%s] Document analysis completed in %.2fs",
+                "[REQ:%s] Document analysis completed in %.2fs (%d pages)",
                 request_id,
                 analyze_duration,
+                page_count,
             )
+            if page_count > 100:
+                logger.info(
+                    "[REQ:%s] Large document detected (%d pages) — extraction may produce substantial content",
+                    request_id,
+                    page_count,
+                )
 
             # Extract markdown content including figure descriptions
             markdown_content = self._build_markdown_from_result(
                 result, request_id, operation_id, include_figures
             )
 
+            # Log content size with estimated token count
+            estimated_tokens = estimate_token_count(markdown_content)
             logger.info(
-                "[REQ:%s] Extracted %d characters of markdown content",
+                "[REQ:%s] Extracted %d characters (~%d tokens) of markdown content",
                 request_id,
                 len(markdown_content),
+                estimated_tokens,
             )
 
             return markdown_content
@@ -192,7 +222,17 @@ class AzureDocumentIntelligenceClient:
 
         # The content property contains the extracted text in markdown format
         if result.content:
-            markdown_parts.append(result.content)
+            markdown_parts.append(self._clean_markdown(result.content))
+
+        # Add table summaries if tables contain structure not fully captured
+        # in the main content markdown
+        if hasattr(result, "tables") and result.tables:
+            table_section = self._extract_table_summaries(
+                result.tables, result.content or "", request_id
+            )
+            if table_section:
+                markdown_parts.append("\n\n---\n\n## Tables Summary\n\n")
+                markdown_parts.append(table_section)
 
         # Add figure/image descriptions if available
         if include_figures and hasattr(result, "figures") and result.figures:
@@ -205,6 +245,103 @@ class AzureDocumentIntelligenceClient:
 
         return "".join(markdown_parts)
 
+    @staticmethod
+    def _clean_markdown(content: str) -> str:
+        """Clean up extracted markdown for better readability.
+
+        Delegates to the shared ``clean_extracted_markdown`` utility in
+        ``services.utils`` for consistent behaviour across extractors.
+        """
+        return clean_extracted_markdown(content)
+
+    def _extract_table_summaries(
+        self,
+        tables: list,
+        main_content: str,
+        request_id: str,
+    ) -> str:
+        """Extract structured summaries from tables not fully present in main content.
+
+        Document Intelligence already renders most tables as markdown inside
+        ``result.content``.  This method adds *supplementary* summaries for
+        tables that include metadata (e.g. row/column counts, captions) not
+        captured by the inline markdown.
+
+        Args:
+            tables: List of table objects from the analysis result
+            main_content: The main markdown content (used to avoid duplication)
+            request_id: Request ID for logging
+
+        Returns:
+            Markdown-formatted table summaries (may be empty string)
+        """
+        if not tables:
+            return ""
+
+        summaries = []
+        for idx, table in enumerate(tables, 1):
+            row_count = getattr(table, "row_count", 0) or 0
+            col_count = getattr(table, "column_count", 0) or 0
+
+            # Only emit a summary for non-trivial tables
+            if row_count < 2 and col_count < 2:
+                continue
+
+            parts = [f"### Table {idx}"]
+            parts.append(f"\n**Dimensions:** {row_count} rows × {col_count} columns")
+
+            # Page location
+            regions = getattr(table, "bounding_regions", None)
+            if regions:
+                pages = sorted({
+                    getattr(r, "page_number", None) for r in regions
+                } - {None})
+                if pages:
+                    if len(pages) == 1:
+                        page_label = f"Page {pages[0]}"
+                    else:
+                        page_label = f"Pages {pages[0]}–{pages[-1]}"
+                    parts.append(f"\n**Location:** {page_label}")
+
+            # Caption
+            caption = getattr(table, "caption", None)
+            if caption:
+                cap_text = getattr(caption, "content", str(caption))
+                if cap_text:
+                    parts.append(f"\n**Caption:** {cap_text}")
+
+            # Collect header row and first data row for a quick preview
+            cells = getattr(table, "cells", []) or []
+            header_cells: dict[int, str] = {}
+            first_row_cells: dict[int, str] = {}
+            for cell in cells:
+                r = getattr(cell, "row_index", None)
+                c = getattr(cell, "column_index", None)
+                text = (getattr(cell, "content", "") or "").strip()
+                kind = getattr(cell, "kind", "content")
+                if r == 0 or kind == "columnHeader":
+                    header_cells.setdefault(c, text)
+                elif r == 1:
+                    first_row_cells.setdefault(c, text)
+
+            if header_cells:
+                headers = [header_cells.get(c, "") for c in range(col_count)]
+                parts.append("\n**Headers:** " + " | ".join(h or "—" for h in headers))
+
+            if first_row_cells and row_count > 2:
+                first_row = [first_row_cells.get(c, "") for c in range(col_count)]
+                parts.append(
+                    "\n**First data row (preview):** " + " | ".join(v or "—" for v in first_row)
+                )
+
+            summaries.append("".join(parts))
+
+        if summaries:
+            logger.info(
+                "[REQ:%s] Extracted %d table summaries", request_id, len(summaries)
+            )
+        return "\n\n".join(summaries)
+
     def _extract_figure_descriptions(
         self,
         figures: list,
@@ -213,7 +350,10 @@ class AzureDocumentIntelligenceClient:
         operation_id: str = None,
     ) -> str:
         """
-        Extract descriptions from figures/images.
+        Extract descriptions from figures/images/charts.
+
+        Produces clean, readable markdown that gives downstream AI agents
+        (e.g. scoring agents) enough context to understand visual content.
 
         Args:
             figures: List of figure objects from the analysis
@@ -236,7 +376,7 @@ class AzureDocumentIntelligenceClient:
             if figure_id:
                 figure_md_parts.append(f"\n**Figure ID:** {figure_id}")
 
-            # Get caption if available
+            # Get caption if available — this is the most descriptive element
             caption = ""
             if hasattr(figure, "caption") and figure.caption:
                 if hasattr(figure.caption, "content"):
@@ -248,32 +388,29 @@ class AzureDocumentIntelligenceClient:
 
             # Get bounding regions (location info)
             if hasattr(figure, "bounding_regions") and figure.bounding_regions:
-                for region in figure.bounding_regions:
-                    page_num = getattr(region, "page_number", "unknown")
-                    figure_md_parts.append(f"\n**Location:** Page {page_num}")
+                page_nums = sorted({
+                    getattr(r, "page_number", None)
+                    for r in figure.bounding_regions
+                } - {None})
+                if page_nums:
+                    figure_md_parts.append(
+                        f"\n**Location:** Page {', '.join(str(p) for p in page_nums)}"
+                    )
 
-            # Get spans information (text content related to the figure)
-            if hasattr(figure, "spans") and figure.spans:
-                span_info = []
-                for span in figure.spans:
-                    offset = getattr(span, "offset", None)
-                    length = getattr(span, "length", None)
-                    if offset is not None and length is not None:
-                        span_info.append(f"offset={offset}, length={length}")
-                if span_info:
-                    figure_md_parts.append(f"\n**Text Spans:** {'; '.join(span_info)}")
-
-            # Get any additional elements in the figure
+            # Get any additional elements in the figure — provides textual
+            # content that was inside or directly associated with the figure
+            # (e.g. axis labels, data labels, chart legends).
             elements_content = []
             if hasattr(figure, "elements") and figure.elements:
-                for elem in figure.elements[:10]:  # Limit to avoid too much content
+                for elem in figure.elements[:20]:  # generous limit for complex charts
                     if isinstance(elem, str):
                         elements_content.append(elem)
                     elif hasattr(elem, "content"):
                         elements_content.append(elem.content)
             if elements_content:
                 figure_md_parts.append(
-                    f"\n**Related Content:** {'; '.join(elements_content)}"
+                    "\n**Content within figure:**\n"
+                    + "\n".join(f"- {c}" for c in elements_content if c.strip())
                 )
 
             # Get footnotes if available
@@ -285,7 +422,17 @@ class AzureDocumentIntelligenceClient:
                     else:
                         footnotes.append(str(fn))
                 if footnotes:
-                    figure_md_parts.append(f"\n**Footnotes:** {'; '.join(footnotes)}")
+                    figure_md_parts.append(
+                        "\n**Footnotes:** " + "; ".join(footnotes)
+                    )
+
+            # If no caption was found, add a note for the reader
+            if not caption and not elements_content:
+                figure_md_parts.append(
+                    "\n*This figure does not have a machine-readable caption or "
+                    "textual content. Refer to the surrounding document context "
+                    "for its meaning.*"
+                )
 
             descriptions.append("".join(figure_md_parts))
 
@@ -456,6 +603,7 @@ class AzureDocumentIntelligenceClient:
         file_bytes: bytes,
         request_id: str = "unknown",
         include_figures: bool = True,
+        pages: str = None,
     ) -> str:
         """
         Async version of analyze_document for parallel processing.
@@ -464,11 +612,12 @@ class AzureDocumentIntelligenceClient:
             file_bytes: The document content as bytes
             request_id: Unique request ID for logging correlation
             include_figures: Whether to include figure/image analysis
+            pages: Optional page range to analyze (e.g., "1-100")
 
         Returns:
             Extracted content as markdown string
         """
         # Run the blocking API call in a thread pool
         return await asyncio.to_thread(
-            self.analyze_document, file_bytes, request_id, include_figures
+            self.analyze_document, file_bytes, request_id, include_figures, pages
         )
