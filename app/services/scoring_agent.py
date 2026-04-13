@@ -330,7 +330,7 @@ The `overall_confidence` should be the average of all individual criterion confi
                     content_budget,
                 )
                 span.set_attribute("criteria.mode", "single")
-                return await self._extract_criteria_single(
+                result = await self._extract_criteria_single(
                     rfp_content, progress_callback, reasoning_effort, start_time
                 )
             else:
@@ -341,9 +341,16 @@ The `overall_confidence` should be the average of all individual criterion confi
                     content_budget,
                 )
                 span.set_attribute("criteria.mode", "chunked")
-                return await self._extract_criteria_chunked(
+                result = await self._extract_criteria_chunked(
                     rfp_content, content_budget, progress_callback, reasoning_effort, start_time
                 )
+
+            # ── Confidence-based re-reasoning ──────────────────────────
+            result = await self._re_reason_criteria_if_needed(
+                result, rfp_content, content_budget, progress_callback, start_time
+            )
+            span.set_attribute("criteria.overall_confidence", result.overall_confidence)
+            return result
 
     async def _extract_criteria_single(
         self,
@@ -604,6 +611,134 @@ Respond with ONLY valid JSON matching the schema in your instructions."""
                 "overall_confidence": 0.0,
             }
 
+    async def _re_reason_criteria_if_needed(
+        self,
+        result: ExtractedCriteria,
+        rfp_content: str,
+        content_budget: int,
+        progress_callback: Optional[Callable[[str], None]],
+        start_time: float,
+    ) -> ExtractedCriteria:
+        """Re-analyze low-confidence criteria with deeper reasoning.
+
+        If the overall confidence is below CONFIDENCE_THRESHOLD, triggers
+        a second pass asking the model to re-examine only the low-confidence
+        criteria.  Capped at one re-reasoning pass.
+        """
+        if result.overall_confidence >= CONFIDENCE_THRESHOLD:
+            logger.info(
+                "Criteria confidence %.2f >= threshold %.2f — no re-reasoning needed",
+                result.overall_confidence,
+                CONFIDENCE_THRESHOLD,
+            )
+            return result
+
+        low_conf = [
+            c for c in result.criteria if c.confidence < CONFIDENCE_THRESHOLD
+        ]
+        if not low_conf:
+            return result
+
+        logger.info(
+            "Criteria overall confidence %.2f < %.2f — re-reasoning %d low-confidence criteria",
+            result.overall_confidence,
+            CONFIDENCE_THRESHOLD,
+            len(low_conf),
+        )
+
+        if progress_callback:
+            progress_callback(
+                f"🔄 Re-analyzing {len(low_conf)} low-confidence criteria for deeper reasoning..."
+            )
+
+        with tracer.start_as_current_span("CriteriaExtractionAgent.re_reason") as span:
+            span.set_attribute("re_reason.low_count", len(low_conf))
+
+            low_names = ", ".join(c.name for c in low_conf)
+            # Truncate rfp content to fit budget
+            rfp_snippet = truncate_content(rfp_content, content_budget)
+
+            re_reason_prompt = f"""You previously extracted scoring criteria from an RFP, but the following criteria had low confidence scores and need deeper analysis:
+
+{low_names}
+
+Please re-examine the RFP and provide improved analysis for these criteria. For each criterion, provide more thorough reasoning and a higher confidence score if the evidence supports it.
+
+## RFP DOCUMENT:
+
+{rfp_snippet}
+
+---
+
+REQUIREMENTS:
+1. Re-analyze ONLY the low-confidence criteria listed above
+2. Provide the same JSON structure as before with ALL criteria (keep high-confidence ones unchanged)
+3. Aim for higher confidence through more thorough analysis
+4. If a criterion truly lacks evidence, it's OK to keep low confidence
+
+Respond with ONLY valid JSON matching the schema in your instructions."""
+
+            try:
+                agent = Agent(
+                    client=self.client,
+                    instructions=self.SYSTEM_INSTRUCTIONS,
+                    name="Criteria Re-Reasoning Agent",
+                    default_options={
+                        "reasoning": {"effort": "high", "summary": "detailed"}
+                    },
+                )
+
+                re_result = await run_with_retry(
+                    lambda: agent.run(re_reason_prompt),
+                    description="Criteria re-reasoning",
+                )
+                re_data = self._parse_response(re_result.text)
+                re_criteria = ExtractedCriteria(**re_data)
+
+                # Merge: for each criterion, keep whichever has higher confidence
+                merged_map = {c.criterion_id: c for c in result.criteria}
+                for new_c in re_criteria.criteria:
+                    old_c = merged_map.get(new_c.criterion_id)
+                    if old_c is None or new_c.confidence > old_c.confidence:
+                        merged_map[new_c.criterion_id] = new_c
+
+                merged_criteria = list(merged_map.values())
+                new_overall = (
+                    sum(c.confidence for c in merged_criteria) / len(merged_criteria)
+                    if merged_criteria
+                    else result.overall_confidence
+                )
+
+                span.set_attribute("re_reason.new_overall_confidence", new_overall)
+                logger.info(
+                    "Re-reasoning improved confidence: %.2f → %.2f",
+                    result.overall_confidence,
+                    new_overall,
+                )
+
+                if progress_callback:
+                    progress_callback(
+                        f"✅ Re-reasoning complete — confidence improved from "
+                        f"{result.overall_confidence:.0%} to {new_overall:.0%}"
+                    )
+
+                return ExtractedCriteria(
+                    rfp_title=result.rfp_title,
+                    rfp_summary=result.rfp_summary,
+                    total_weight=result.total_weight,
+                    criteria=merged_criteria,
+                    extraction_notes=(
+                        result.extraction_notes
+                        + f" | Re-reasoning improved {len(low_conf)} criteria"
+                    ),
+                    overall_confidence=new_overall,
+                )
+
+            except Exception as e:
+                logger.warning("Criteria re-reasoning failed, using initial results: %s", e)
+                span.record_exception(e)
+                return result
+
 
 # ============================================================================
 # Agent 2: Proposal Scoring Agent
@@ -819,7 +954,7 @@ The `overall_confidence` should be the average of all individual criterion score
                     content_budget,
                 )
                 span.set_attribute("scoring.mode", "single")
-                return await self._score_proposal_single(
+                result = await self._score_proposal_single(
                     criteria, criteria_json, system_instructions, proposal_content,
                     progress_callback, reasoning_effort, start_time,
                 )
@@ -830,10 +965,18 @@ The `overall_confidence` should be the average of all individual criterion score
                     content_budget,
                 )
                 span.set_attribute("scoring.mode", "chunked")
-                return await self._score_proposal_chunked(
+                result = await self._score_proposal_chunked(
                     criteria, criteria_json, system_instructions, proposal_content,
                     content_budget, progress_callback, reasoning_effort, start_time,
                 )
+
+            # ── Confidence-based re-reasoning ──────────────────────────
+            result = await self._re_reason_scores_if_needed(
+                result, criteria, system_instructions, proposal_content,
+                content_budget, progress_callback, start_time,
+            )
+            span.set_attribute("scoring.overall_confidence", result.overall_confidence)
+            return result
 
     async def _score_proposal_single(
         self,
@@ -1175,6 +1318,172 @@ Respond with ONLY valid JSON matching the schema in your instructions."""
                 "risk_assessment": "Unable to assess",
                 "overall_confidence": 0.0,
             }
+
+    async def _re_reason_scores_if_needed(
+        self,
+        result: ProposalEvaluation,
+        criteria: ExtractedCriteria,
+        system_instructions: str,
+        proposal_content: str,
+        content_budget: int,
+        progress_callback: Optional[Callable[[str], None]],
+        start_time: float,
+    ) -> ProposalEvaluation:
+        """Re-evaluate low-confidence criterion scores with deeper reasoning.
+
+        Identifies criterion scores below CONFIDENCE_THRESHOLD and asks the
+        model to re-examine them.  Capped at one re-reasoning pass.
+        """
+        if result.overall_confidence >= CONFIDENCE_THRESHOLD:
+            logger.info(
+                "Scoring confidence %.2f >= threshold %.2f — no re-reasoning needed",
+                result.overall_confidence,
+                CONFIDENCE_THRESHOLD,
+            )
+            return result
+
+        low_conf = [
+            cs for cs in result.criterion_scores
+            if cs.confidence < CONFIDENCE_THRESHOLD
+        ]
+        if not low_conf:
+            return result
+
+        logger.info(
+            "Scoring overall confidence %.2f < %.2f — re-reasoning %d low-confidence scores",
+            result.overall_confidence,
+            CONFIDENCE_THRESHOLD,
+            len(low_conf),
+        )
+
+        if progress_callback:
+            progress_callback(
+                f"🔄 Re-analyzing {len(low_conf)} low-confidence scores for deeper reasoning..."
+            )
+
+        with tracer.start_as_current_span("ProposalScoringAgent.re_reason") as span:
+            span.set_attribute("re_reason.low_count", len(low_conf))
+
+            low_desc = "\n".join(
+                f"- {cs.criterion_name} (ID: {cs.criterion_id}, confidence: {cs.confidence:.2f})"
+                for cs in low_conf
+            )
+
+            proposal_snippet = truncate_content(proposal_content, content_budget)
+
+            re_reason_prompt = f"""You previously scored a vendor proposal, but the following criteria had low confidence scores and need deeper analysis:
+
+{low_desc}
+
+Please re-examine the proposal and provide improved scoring for these criteria. Look more carefully for evidence in the proposal text.
+
+## RFP CONTEXT:
+- Title: {criteria.rfp_title}
+- Summary: {criteria.rfp_summary}
+
+## VENDOR PROPOSAL:
+
+{proposal_snippet}
+
+---
+
+REQUIREMENTS:
+1. Re-analyze ONLY the low-confidence criteria listed above
+2. Provide the full JSON structure with ALL criterion scores (keep high-confidence ones unchanged)
+3. Search more thoroughly for evidence to support your scoring
+4. If evidence truly isn't present, it's OK to keep low confidence
+
+Respond with ONLY valid JSON matching the schema in your instructions."""
+
+            try:
+                agent = Agent(
+                    client=self.client,
+                    instructions=system_instructions,
+                    name="Scoring Re-Reasoning Agent",
+                    default_options={
+                        "reasoning": {"effort": "high", "summary": "detailed"}
+                    },
+                )
+
+                re_result = await run_with_retry(
+                    lambda: agent.run(re_reason_prompt),
+                    description="Scoring re-reasoning",
+                )
+                re_data = self._parse_response(re_result.text, criteria)
+                re_eval = ProposalEvaluation(**re_data)
+
+                # Merge: for each criterion score keep whichever has higher confidence
+                merged_map = {cs.criterion_id: cs for cs in result.criterion_scores}
+                low_ids = {cs.criterion_id for cs in low_conf}
+                for new_cs in re_eval.criterion_scores:
+                    if new_cs.criterion_id in low_ids:
+                        old_cs = merged_map.get(new_cs.criterion_id)
+                        if old_cs is None or new_cs.confidence > old_cs.confidence:
+                            # Mark as having had re-reasoning
+                            new_cs_dict = new_cs.model_dump()
+                            new_cs_dict["reasoning_iterations"] = 2
+                            merged_map[new_cs.criterion_id] = CriterionScore(**new_cs_dict)
+
+                merged_scores = list(merged_map.values())
+
+                # Recalculate totals
+                total_score = round(sum(cs.weighted_score for cs in merged_scores), 2)
+                new_overall_conf = (
+                    sum(cs.confidence for cs in merged_scores) / len(merged_scores)
+                    if merged_scores
+                    else result.overall_confidence
+                )
+
+                # Determine grade
+                if total_score >= 90:
+                    grade = "A"
+                elif total_score >= 80:
+                    grade = "B"
+                elif total_score >= 70:
+                    grade = "C"
+                elif total_score >= 60:
+                    grade = "D"
+                else:
+                    grade = "F"
+
+                span.set_attribute("re_reason.new_overall_confidence", new_overall_conf)
+                logger.info(
+                    "Scoring re-reasoning improved confidence: %.2f → %.2f",
+                    result.overall_confidence,
+                    new_overall_conf,
+                )
+
+                if progress_callback:
+                    progress_callback(
+                        f"✅ Re-reasoning complete — confidence improved from "
+                        f"{result.overall_confidence:.0%} to {new_overall_conf:.0%}"
+                    )
+
+                return ProposalEvaluation(
+                    rfp_title=result.rfp_title,
+                    supplier_name=result.supplier_name,
+                    supplier_site=result.supplier_site,
+                    response_id=result.response_id,
+                    evaluation_date=result.evaluation_date,
+                    is_qualified_proposal=result.is_qualified_proposal,
+                    disqualification_reason=result.disqualification_reason,
+                    total_score=total_score,
+                    score_percentage=total_score,
+                    grade=grade,
+                    recommendation=result.recommendation,
+                    criterion_scores=merged_scores,
+                    executive_summary=result.executive_summary,
+                    overall_strengths=result.overall_strengths,
+                    overall_weaknesses=result.overall_weaknesses,
+                    recommendations=result.recommendations,
+                    risk_assessment=result.risk_assessment,
+                    overall_confidence=new_overall_conf,
+                )
+
+            except Exception as e:
+                logger.warning("Scoring re-reasoning failed, using initial results: %s", e)
+                span.record_exception(e)
+                return result
 
 
 # ============================================================================

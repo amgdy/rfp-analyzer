@@ -111,10 +111,12 @@ async def extract_criteria(
                     "weight": c.weight,
                     "max_score": c.max_score,
                     "evaluation_guidance": c.evaluation_guidance,
+                    "confidence": c.confidence,
                 }
                 for c in criteria.criteria
             ],
             "extraction_notes": criteria.extraction_notes,
+            "overall_confidence": criteria.overall_confidence,
         }
 
         duration = time.time() - start_time
@@ -190,6 +192,8 @@ async def score_proposal(
                     "justification": cs.justification,
                     "strengths": cs.strengths,
                     "gaps": cs.gaps,
+                    "confidence": cs.confidence,
+                    "reasoning_iterations": cs.reasoning_iterations,
                 }
                 for cs in evaluation.criterion_scores
             ],
@@ -198,6 +202,7 @@ async def score_proposal(
             "overall_weaknesses": evaluation.overall_weaknesses,
             "recommendations": evaluation.recommendations,
             "risk_assessment": evaluation.risk_assessment,
+            "overall_confidence": evaluation.overall_confidence,
             "_metadata": {
                 "version": "2.0",
                 "evaluation_type": "multi-agent",
