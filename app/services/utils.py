@@ -230,35 +230,36 @@ def extract_docx_as_markdown(file_bytes: bytes) -> str:
         ) from exc
     parts: list[str] = []
 
+    # Pre-build element→object maps to avoid O(n²) inner scans
+    para_map = {para._element: para for para in doc.paragraphs}
+    table_map = {table._element: table for table in doc.tables}
+
     for element in doc.element.body:
         tag = element.tag.split("}")[-1]  # strip namespace
 
         if tag == "p":
-            # Paragraph — check if it has a heading style
-            for para in doc.paragraphs:
-                if para._element is element:
-                    text = para.text.strip()
-                    if not text:
-                        break
-                    style_name = (para.style.name or "").lower() if para.style else ""
-                    if style_name.startswith("heading"):
-                        # Map heading level: "Heading 1" → "#", "Heading 2" → "##", etc.
-                        try:
-                            level = int(style_name.split()[-1])
-                        except (ValueError, IndexError):
-                            level = _MIN_HEADING_LEVEL
-                        level = max(_MIN_HEADING_LEVEL, min(level, _MAX_HEADING_LEVEL))
-                        parts.append(f"\n{'#' * level} {text}\n")
-                    else:
-                        parts.append(text)
-                    break
+            para = para_map.get(element)
+            if para is None:
+                continue
+            text = para.text.strip()
+            if not text:
+                continue
+            style_name = (para.style.name or "").lower() if para.style else ""
+            if style_name.startswith("heading"):
+                # Map heading level: "Heading 1" → "#", "Heading 2" → "##", etc.
+                try:
+                    level = int(style_name.split()[-1])
+                except (ValueError, IndexError):
+                    level = _MIN_HEADING_LEVEL
+                level = max(_MIN_HEADING_LEVEL, min(level, _MAX_HEADING_LEVEL))
+                parts.append(f"\n{'#' * level} {text}\n")
+            else:
+                parts.append(text)
 
         elif tag == "tbl":
-            # Table — render as markdown table
-            for table in doc.tables:
-                if table._element is element:
-                    _render_table(table, parts)
-                    break
+            table = table_map.get(element)
+            if table is not None:
+                _render_table(table, parts)
 
     return clean_extracted_markdown("\n\n".join(parts))
 
