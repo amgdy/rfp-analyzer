@@ -13,6 +13,7 @@ from services.scoring_agent import (
     ProposalEvaluation,
     CriteriaExtractionAgent,
     ProposalScoringAgent,
+    CONFIDENCE_THRESHOLD,
 )
 
 
@@ -34,6 +35,19 @@ class TestScoringCriterion:
         )
         assert c.criterion_id == "C-1"
         assert c.max_score == 100  # default
+        assert c.confidence == 0.8  # default
+
+    def test_custom_confidence(self):
+        c = ScoringCriterion(
+            criterion_id="C-1",
+            name="Technical",
+            description="Tech capabilities",
+            category="Technical",
+            weight=30.0,
+            evaluation_guidance="Score based on tech",
+            confidence=0.95,
+        )
+        assert c.confidence == 0.95
 
     def test_custom_max_score(self):
         c = ScoringCriterion(
@@ -65,6 +79,7 @@ class TestExtractedCriteria:
         )
         assert criteria.total_weight == 100.0
         assert len(criteria.criteria) == 1
+        assert criteria.overall_confidence == 0.8  # default
 
 
 class TestCriterionScore:
@@ -83,6 +98,25 @@ class TestCriterionScore:
             gaps=["B"]
         )
         assert cs.weighted_score == 42.5
+        assert cs.confidence == 0.8  # default
+        assert cs.reasoning_iterations == 1  # default
+
+    def test_custom_confidence_and_iterations(self):
+        cs = CriterionScore(
+            criterion_id="C-1",
+            criterion_name="Technical",
+            weight=50.0,
+            raw_score=85.0,
+            weighted_score=42.5,
+            evidence="Good",
+            justification="Strong",
+            strengths=["A"],
+            gaps=["B"],
+            confidence=0.95,
+            reasoning_iterations=2,
+        )
+        assert cs.confidence == 0.95
+        assert cs.reasoning_iterations == 2
 
 
 class TestProposalEvaluation:
@@ -107,6 +141,17 @@ class TestProposalEvaluation:
             risk_assessment="Low"
         )
         assert ev.grade == "B"
+        assert ev.overall_confidence == 0.8  # default
+
+
+class TestConfidenceThreshold:
+    """Tests for CONFIDENCE_THRESHOLD constant."""
+
+    def test_threshold_value(self):
+        assert CONFIDENCE_THRESHOLD == 0.7
+
+    def test_threshold_is_float(self):
+        assert isinstance(CONFIDENCE_THRESHOLD, float)
 
 
 # ============================================================================
@@ -174,6 +219,43 @@ class TestCriteriaExtractionAgentParse:
         """None model response should raise so retry can kick in."""
         with pytest.raises(RuntimeError, match="empty response text"):
             agent._parse_response(None)
+
+    def test_parse_adds_default_confidence(self, agent):
+        """Criteria without confidence get default 0.8."""
+        response = json.dumps({
+            "rfp_title": "Test",
+            "rfp_summary": "Summary",
+            "total_weight": 100.0,
+            "criteria": [
+                {"criterion_id": "C-1", "name": "A", "weight": 100.0}
+            ],
+            "extraction_notes": "OK"
+        })
+        result = agent._parse_response(response)
+        assert result["criteria"][0]["confidence"] == 0.8
+        assert abs(result["overall_confidence"] - 0.8) < 0.01
+
+    def test_parse_preserves_explicit_confidence(self, agent):
+        """Criteria with explicit confidence keep their value."""
+        response = json.dumps({
+            "rfp_title": "Test",
+            "rfp_summary": "Summary",
+            "total_weight": 100.0,
+            "criteria": [
+                {"criterion_id": "C-1", "name": "A", "weight": 50.0, "confidence": 0.95},
+                {"criterion_id": "C-2", "name": "B", "weight": 50.0, "confidence": 0.55},
+            ],
+            "extraction_notes": "OK"
+        })
+        result = agent._parse_response(response)
+        assert result["criteria"][0]["confidence"] == 0.95
+        assert result["criteria"][1]["confidence"] == 0.55
+        assert abs(result["overall_confidence"] - 0.75) < 0.01
+
+    def test_parse_error_fallback_has_zero_confidence(self, agent):
+        """Error fallback should have 0 confidence."""
+        result = agent._parse_response("not json")
+        assert result["overall_confidence"] == 0.0
 
 
 # ============================================================================
@@ -277,3 +359,33 @@ class TestProposalScoringAgentParse:
         result = agent._parse_response(response, criteria)
         assert "evaluation_date" in result
         assert result["evaluation_date"] != ""
+
+    def test_parse_adds_default_confidence(self, agent, criteria):
+        """Criterion scores without confidence get default 0.8."""
+        response = json.dumps({
+            "criterion_scores": [
+                {"raw_score": 80.0, "weight": 100.0},
+            ],
+        })
+        result = agent._parse_response(response, criteria)
+        assert result["criterion_scores"][0]["confidence"] == 0.8
+        assert result["criterion_scores"][0]["reasoning_iterations"] == 1
+        assert abs(result["overall_confidence"] - 0.8) < 0.01
+
+    def test_parse_preserves_explicit_confidence(self, agent, criteria):
+        """Explicit confidence values are kept."""
+        response = json.dumps({
+            "criterion_scores": [
+                {"raw_score": 80.0, "weight": 50.0, "confidence": 0.95},
+                {"raw_score": 70.0, "weight": 50.0, "confidence": 0.55},
+            ],
+        })
+        result = agent._parse_response(response, criteria)
+        assert result["criterion_scores"][0]["confidence"] == 0.95
+        assert result["criterion_scores"][1]["confidence"] == 0.55
+        assert abs(result["overall_confidence"] - 0.75) < 0.01
+
+    def test_parse_error_fallback_has_zero_confidence(self, agent, criteria):
+        """Error fallback should have 0 confidence."""
+        result = agent._parse_response("broken", criteria)
+        assert result["overall_confidence"] == 0.0
