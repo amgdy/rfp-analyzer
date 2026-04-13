@@ -3,7 +3,7 @@
 Provides token counting, budget management, and content splitting
 to ensure documents fit within model context windows.
 
-Configured for GPT-5.4 (1.05M token context, 128K max output).
+Default configuration: 1.05M token context, 128K max output.
 The context window size can be overridden via the ``MAX_CONTEXT_TOKENS``
 environment variable.
 """
@@ -18,11 +18,11 @@ logger = get_logger(__name__)
 
 
 # ============================================================================
-# Model Configuration - GPT-5.4
+# Model Configuration
 # ============================================================================
 
 def _load_context_window() -> int:
-    """Load the model context window size from env or use GPT-5.4 default."""
+    """Load the model context window size from env or use the default (1.05M)."""
     env_val = os.getenv("MAX_CONTEXT_TOKENS")
     if env_val:
         try:
@@ -37,10 +37,10 @@ def _load_context_window() -> int:
     return 1_050_000
 
 
-# GPT-5.4 context window: 1,050,000 tokens (overridable via MAX_CONTEXT_TOKENS env var)
+# Context window: 1,050,000 tokens (overridable via MAX_CONTEXT_TOKENS env var)
 MODEL_CONTEXT_WINDOW = _load_context_window()
 
-# Maximum output tokens for GPT-5.4
+# Maximum output tokens
 MAX_OUTPUT_TOKENS = 128_000
 
 # Safety margin to account for tokenizer estimation inaccuracy
