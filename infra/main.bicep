@@ -14,6 +14,7 @@ param environmentName string
 })
 param location string
 
+@description('Location for Azure AI Foundry account and model deployments')
 @metadata({azd: {
   type: 'location'
   usageName: [
@@ -21,6 +22,12 @@ param location string
   ]}
 })
 param foundryLocation string
+
+@description('The GPT reasoning model name to deploy (e.g. gpt-5.4)')
+param reasoningModelName string
+
+@description('The GPT reasoning model version to deploy (e.g. 2026-03-05)')
+param reasoningModelVersion string
 
 param rfpAnalyzerExists bool
 
@@ -54,6 +61,8 @@ module resources 'resources.bicep' = {
     tags: tags
     rfpAnalyzerExists: rfpAnalyzerExists
     foundryLocation: foundryLocation
+    reasoningModelName: reasoningModelName
+    reasoningModelVersion: reasoningModelVersion
   }
   dependsOn: [
     rfpResourceGroup
@@ -65,3 +74,4 @@ output AZURE_RESOURCE_RFP_ANALYZER_ID string = resources.outputs.AZURE_RESOURCE_
 output AZURE_OPENAI_ENDPOINT string = resources.outputs.AZURE_OPENAI_ENDPOINT
 output AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT string = resources.outputs.AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT
 output AZURE_CONTENT_UNDERSTANDING_ENDPOINT string = resources.outputs.AZURE_CONTENT_UNDERSTANDING_ENDPOINT
+output SERVICE_RFP_ANALYZER_URL string = resources.outputs.SERVICE_RFP_ANALYZER_URL

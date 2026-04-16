@@ -10,21 +10,24 @@ param rfpAnalyzerExists bool
 @description('The location for Microsoft Foundry project deployments')
 param foundryLocation string
 
+@description('The GPT reasoning model name to deploy')
+param reasoningModelName string
+
+@description('The GPT reasoning model version to deploy')
+param reasoningModelVersion string
+
 var abbrs = loadJsonContent('./abbreviations.json')
 var resourceToken = substring(toLower(uniqueString(subscription().id, resourceGroup().id, location)), 0, 6)
 var workload = 'rfpa'
 
 
-var modelName = 'gpt-5.2'
-var modelVersion = '2025-12-11'
-
 var defaultOpenAiDeployments = [
   {
-    name: modelName
+    name: reasoningModelName
     model: {
       format: 'OpenAI'
-      name: modelName
-      version: modelVersion
+      name: reasoningModelName
+      version: reasoningModelVersion
     }
     sku: {
       name: 'GlobalStandard'
@@ -188,7 +191,7 @@ module containerRegistry 'br/public:avm/res/container-registry/registry:0.12.1' 
 }
 
 // Container apps environment
-module containerAppsEnvironment 'br/public:avm/res/app/managed-environment:0.13.1' = {
+module containerAppsEnvironment 'br/public:avm/res/app/managed-environment:0.13.2' = {
   name: 'container-apps-environment'
   params: {
     name: '${abbrs.appManagedEnvironments}${workload}-${resourceToken}'
@@ -201,6 +204,12 @@ module containerAppsEnvironment 'br/public:avm/res/app/managed-environment:0.13.
       destination: 'log-analytics'
       logAnalyticsWorkspaceResourceId: monitoring.outputs.logAnalyticsWorkspaceResourceId
     }
+    workloadProfiles: [
+      {
+        name: 'Consumption'
+        workloadProfileType: 'Consumption'
+      }
+    ]
   }
 }
 
@@ -251,7 +260,7 @@ module rfpAnalyzer 'br/public:avm/res/app/container-app:0.22.0' = {
           }
           {
             name: 'AZURE_OPENAI_DEPLOYMENT_NAME'
-            value: modelName
+            value: reasoningModelName
           }
           {
             name: 'OTEL_LOGGING_ENABLED'
@@ -290,6 +299,7 @@ module rfpAnalyzer 'br/public:avm/res/app/container-app:0.22.0' = {
         identity: rfpAnalyzerIdentity.outputs.resourceId
       }
     ]
+    workloadProfileName: 'Consumption'
     environmentResourceId: containerAppsEnvironment.outputs.resourceId
     location: location
     tags: union(tags, { 'azd-service-name': 'rfp-analyzer' })
@@ -344,3 +354,4 @@ output AZURE_RESOURCE_RFP_ANALYZER_ID string = rfpAnalyzer.outputs.resourceId
 output AZURE_OPENAI_ENDPOINT string = azureOpenAiEndpoint
 output AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT string = documentIntelligenceEndpoint
 output AZURE_CONTENT_UNDERSTANDING_ENDPOINT string = contentUnderstandingEndpoint
+output SERVICE_RFP_ANALYZER_URL string = 'https://${rfpAnalyzer.outputs.fqdn}'
