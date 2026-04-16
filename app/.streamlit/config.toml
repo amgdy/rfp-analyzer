@@ -5,6 +5,11 @@ maxUploadSize = 500
 # Maximum size of message that can be sent via websocket (in MB)
 maxMessageSize = 500
 
+# Disable WebSocket compression to prevent message corruption behind
+# reverse-proxies (Envoy in Azure Container Apps) which can surface as
+# AxiosError 400 on file upload.
+enableWebsocketCompression = false
+
 # Enable CORS for container environments
 enableCORS = false
 enableXsrfProtection = false
