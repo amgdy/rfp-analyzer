@@ -9,7 +9,13 @@
         "value": "${AZURE_LOCATION}"
       },
       "foundryLocation": {
-        "value": "${AZURE_FOUNDRY_LOCATION=${AZURE_LOCATION}}"
+        "value": "${AZURE_FOUNDRY_LOCATION}"
+      },
+      "reasoningModelName": {
+        "value": "${AZURE_REASONING_MODEL_NAME=gpt-5.4}"
+      },
+      "reasoningModelVersion": {
+        "value": "${AZURE_REASONING_MODEL_VERSION=2026-03-05}"
       },
       "rfpAnalyzerExists": {
         "value": "${SERVICE_RFP_ANALYZER_RESOURCE_EXISTS=false}"
