@@ -227,7 +227,9 @@ module rfpAnalyzer 'br/public:avm/res/app/container-app:0.22.0' = {
     name: '${abbrs.appContainerApps}${workload}-${resourceToken}'
     ingressTargetPort: 8501
     ingressExternal: true
-    // Allow larger file uploads (default is often 100MB, set to 200MB for RFP documents)
+    // Sticky sessions required for Streamlit – the WebSocket session and HTTP file
+    // upload requests must reach the same replica to avoid AxiosError 400.
+    stickySessionsAffinity: 'sticky'
     maxInactiveRevisions: 5
     scaleSettings: {
       minReplicas: 1
