@@ -29,6 +29,9 @@ param reasoningModelName string
 @description('The GPT reasoning model version to deploy (e.g. 2026-03-05)')
 param reasoningModelVersion string
 
+@description('Id of the user or app to assign application roles')
+param principalId string = ''
+
 param rfpAnalyzerExists bool
 
 // Tags that should be applied to all resources.
@@ -63,6 +66,7 @@ module resources 'resources.bicep' = {
     foundryLocation: foundryLocation
     reasoningModelName: reasoningModelName
     reasoningModelVersion: reasoningModelVersion
+    principalId: principalId
   }
   dependsOn: [
     rfpResourceGroup

@@ -16,6 +16,9 @@ param reasoningModelName string
 @description('The GPT reasoning model version to deploy')
 param reasoningModelVersion string
 
+@description('Id of the user or app to assign application roles')
+param principalId string = ''
+
 var abbrs = loadJsonContent('./abbreviations.json')
 var resourceToken = substring(toLower(uniqueString(subscription().id, resourceGroup().id, location)), 0, 6)
 var workload = 'rfpa'
@@ -348,6 +351,38 @@ module rfpAnalyzerbackendRoleMonitoringMetricsPublisherRG 'br/public:avm/res/aut
     roleDefinitionIdOrName: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '3913510d-42f4-4e42-8a64-420c390055eb')
     principalType: 'ServicePrincipal'
     description: 'Role assignment for Monitoring Metrics Publisher in Resource Group scope'
+  }
+}
+
+// --- Deployer (current user) role assignments for post-provision hooks and local dev ---
+
+module deployerRoleAzureAIDeveloperRG 'br/public:avm/res/authorization/role-assignment/rg-scope:0.1.1' = if (!empty(principalId)) {
+  name: 'deployer-role-ai-developer'
+  params: {
+    principalId: principalId
+    roleDefinitionIdOrName: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '64702f94-c441-49e6-a78b-ef80e0188fee')
+    principalType: 'User'
+    description: 'Role assignment for deployer – Azure AI Developer in Resource Group scope'
+  }
+}
+
+module deployerRoleCognitiveServicesUserRG 'br/public:avm/res/authorization/role-assignment/rg-scope:0.1.1' = if (!empty(principalId)) {
+  name: 'deployer-role-cognitive-services-user'
+  params: {
+    principalId: principalId
+    roleDefinitionIdOrName: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'a97b65f3-24c7-4388-baec-2e87135dc908')
+    principalType: 'User'
+    description: 'Role assignment for deployer – Cognitive Services User in Resource Group scope'
+  }
+}
+
+module deployerRoleCognitiveServicesOpenAIUserRG 'br/public:avm/res/authorization/role-assignment/rg-scope:0.1.1' = if (!empty(principalId)) {
+  name: 'deployer-role-cognitive-services-openai-user'
+  params: {
+    principalId: principalId
+    roleDefinitionIdOrName: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd')
+    principalType: 'User'
+    description: 'Role assignment for deployer – Cognitive Services OpenAI User in Resource Group scope'
   }
 }
 
