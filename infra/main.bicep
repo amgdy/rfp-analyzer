@@ -15,11 +15,13 @@ param environmentName string
 param location string
 
 @description('Location for Azure AI Foundry account and model deployments')
-@metadata({azd: {
-  type: 'location'
-  usageName: [
-    'OpenAI.GlobalStandard.gpt-5.2,10'
-  ]}
+@metadata({
+  azd: {
+    type: 'location'
+    usageName: [
+      'OpenAI.GlobalStandard.gpt-5.2,10'
+    ]
+  }
 })
 param foundryLocation string
 
@@ -30,7 +32,7 @@ param reasoningModelName string
 param reasoningModelVersion string
 
 @description('Id of the user or app to assign application roles')
-param principalId string = ''
+param principalId string
 
 param rfpAnalyzerExists bool
 
@@ -47,14 +49,12 @@ var tags = {
 var resourceGroupName = 'rg-${environmentName}'
 
 module rfpResourceGroup 'br/public:avm/res/resources/resource-group:0.4.3' = {
-  params: { 
+  params: {
     name: resourceGroupName
     location: location
     tags: tags
   }
 }
-
-
 
 module resources 'resources.bicep' = {
   scope: resourceGroup(resourceGroupName)

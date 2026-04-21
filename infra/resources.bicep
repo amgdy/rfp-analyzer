@@ -4,7 +4,6 @@ param location string = resourceGroup().location
 @description('Tags that will be applied to all resources')
 param tags object = {}
 
-
 param rfpAnalyzerExists bool
 
 @description('The location for Microsoft Foundry project deployments')
@@ -17,12 +16,11 @@ param reasoningModelName string
 param reasoningModelVersion string
 
 @description('Id of the user or app to assign application roles')
-param principalId string = ''
+param principalId string
 
 var abbrs = loadJsonContent('./abbreviations.json')
 var resourceToken = substring(toLower(uniqueString(subscription().id, resourceGroup().id, location)), 0, 6)
 var workload = 'rfpa'
-
 
 var defaultOpenAiDeployments = [
   {
@@ -75,7 +73,6 @@ var defaultOpenAiDeployments = [
   }
 ]
 
-
 // Monitor application with Azure Monitor
 module monitoring 'br/public:avm/ptn/azd/monitoring:0.2.1' = {
   name: 'monitoring'
@@ -89,14 +86,13 @@ module monitoring 'br/public:avm/ptn/azd/monitoring:0.2.1' = {
   }
 }
 
-
 var foundryProjectName = '${abbrs.aiFoundryProjects}${workload}-${resourceToken}'
 var foundryAccountName = '${abbrs.aiFoundryAccounts}${workload}-${resourceToken}'
 
 // Microsoft Foundry Resource
 module foundryAccount 'br/public:avm/res/cognitive-services/account:0.14.2' = {
   name: 'foundry-project'
-  params:{
+  params: {
     name: foundryAccountName
     kind: 'AIServices'
     location: foundryLocation
@@ -107,7 +103,7 @@ module foundryAccount 'br/public:avm/res/cognitive-services/account:0.14.2' = {
     }
     customSubDomainName: foundryAccountName
     allowProjectManagement: true
-    managedIdentities:{
+    managedIdentities: {
       systemAssigned: false
       userAssignedResourceIds: [rfpAnalyzerIdentity.outputs.resourceId]
     }
@@ -161,8 +157,6 @@ var azureOpenAiEndpoint = foundryAccount.outputs.endpoints['OpenAI Language Mode
 var documentIntelligenceEndpoint = foundryAccount.outputs.endpoints.FormRecognizer
 var contentUnderstandingEndpoint = foundryAccount.outputs.endpoints['Content Understanding']
 
-
-
 module rfpAnalyzerIdentity 'br/public:avm/res/managed-identity/user-assigned-identity:0.5.0' = {
   name: 'rfpAnalyzeridentity'
   params: {
@@ -179,15 +173,18 @@ module containerRegistry 'br/public:avm/res/container-registry/registry:0.12.1' 
     location: location
     tags: tags
     acrSku: 'Standard'
-    zoneRedundancy:'Disabled'
+    zoneRedundancy: 'Disabled'
     acrAdminUserEnabled: false
     exportPolicyStatus: 'enabled'
     enableTelemetry: true
-    roleAssignments:[
+    roleAssignments: [
       {
         principalId: rfpAnalyzerIdentity.outputs.principalId
         principalType: 'ServicePrincipal'
-        roleDefinitionIdOrName: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
+        roleDefinitionIdOrName: subscriptionResourceId(
+          'Microsoft.Authorization/roleDefinitions',
+          '7f951dda-4ed3-4680-a7ca-43fe172d538d'
+        )
       }
     ]
   }
@@ -237,7 +234,7 @@ module rfpAnalyzer 'br/public:avm/res/app/container-app:0.22.0' = {
     scaleSettings: {
       minReplicas: 1
       maxReplicas: 10
-    }    
+    }
     containers: [
       {
         image: rfpAnalyzerFetchLatestImage.outputs.?containers[?0].?image ?? 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
@@ -294,11 +291,11 @@ module rfpAnalyzer 'br/public:avm/res/app/container-app:0.22.0' = {
         ]
       }
     ]
-    managedIdentities:{
+    managedIdentities: {
       systemAssigned: false
       userAssignedResourceIds: [rfpAnalyzerIdentity.outputs.resourceId]
     }
-    registries:[
+    registries: [
       {
         server: containerRegistry.outputs.loginServer
         identity: rfpAnalyzerIdentity.outputs.resourceId
@@ -316,7 +313,10 @@ module rfpAnalyzerbackendRoleAzureAIDeveloperRG 'br/public:avm/res/authorization
   params: {
     // Required parameters
     principalId: rfpAnalyzerIdentity.outputs.principalId
-    roleDefinitionIdOrName: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '64702f94-c441-49e6-a78b-ef80e0188fee') 
+    roleDefinitionIdOrName: subscriptionResourceId(
+      'Microsoft.Authorization/roleDefinitions',
+      '64702f94-c441-49e6-a78b-ef80e0188fee'
+    )
     // Non-required parameters
     principalType: 'ServicePrincipal'
     description: 'Role assignment for Azure AI Developer in Resource Group scope'
@@ -327,7 +327,10 @@ module rfpAnalyzerbackendRoleCognitiveServicesUserRG 'br/public:avm/res/authoriz
   params: {
     // Required parameters
     principalId: rfpAnalyzerIdentity.outputs.principalId
-    roleDefinitionIdOrName: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'a97b65f3-24c7-4388-baec-2e87135dc908') 
+    roleDefinitionIdOrName: subscriptionResourceId(
+      'Microsoft.Authorization/roleDefinitions',
+      'a97b65f3-24c7-4388-baec-2e87135dc908'
+    )
     // Non-required parameters
     principalType: 'ServicePrincipal'
     description: 'Role assignment for Cognitive Services User in Resource Group scope'
@@ -338,7 +341,10 @@ module rfpAnalyzerbackendRoleCognitiveServicesUserRG 'br/public:avm/res/authoriz
 module rfpAnalyzerbackendRoleCognitiveServicesOpenAIUserRG 'br/public:avm/res/authorization/role-assignment/rg-scope:0.1.1' = {
   params: {
     principalId: rfpAnalyzerIdentity.outputs.principalId
-    roleDefinitionIdOrName: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd')
+    roleDefinitionIdOrName: subscriptionResourceId(
+      'Microsoft.Authorization/roleDefinitions',
+      '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd'
+    )
     principalType: 'ServicePrincipal'
     description: 'Role assignment for Cognitive Services OpenAI User in Resource Group scope'
   }
@@ -348,7 +354,10 @@ module rfpAnalyzerbackendRoleCognitiveServicesOpenAIUserRG 'br/public:avm/res/au
 module rfpAnalyzerbackendRoleMonitoringMetricsPublisherRG 'br/public:avm/res/authorization/role-assignment/rg-scope:0.1.1' = {
   params: {
     principalId: rfpAnalyzerIdentity.outputs.principalId
-    roleDefinitionIdOrName: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '3913510d-42f4-4e42-8a64-420c390055eb')
+    roleDefinitionIdOrName: subscriptionResourceId(
+      'Microsoft.Authorization/roleDefinitions',
+      '3913510d-42f4-4e42-8a64-420c390055eb'
+    )
     principalType: 'ServicePrincipal'
     description: 'Role assignment for Monitoring Metrics Publisher in Resource Group scope'
   }
@@ -360,7 +369,10 @@ module deployerRoleAzureAIDeveloperRG 'br/public:avm/res/authorization/role-assi
   name: 'deployer-role-ai-developer'
   params: {
     principalId: principalId
-    roleDefinitionIdOrName: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '64702f94-c441-49e6-a78b-ef80e0188fee')
+    roleDefinitionIdOrName: subscriptionResourceId(
+      'Microsoft.Authorization/roleDefinitions',
+      '64702f94-c441-49e6-a78b-ef80e0188fee'
+    )
     principalType: 'User'
     description: 'Role assignment for deployer – Azure AI Developer in Resource Group scope'
   }
@@ -370,7 +382,10 @@ module deployerRoleCognitiveServicesUserRG 'br/public:avm/res/authorization/role
   name: 'deployer-role-cognitive-services-user'
   params: {
     principalId: principalId
-    roleDefinitionIdOrName: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'a97b65f3-24c7-4388-baec-2e87135dc908')
+    roleDefinitionIdOrName: subscriptionResourceId(
+      'Microsoft.Authorization/roleDefinitions',
+      'a97b65f3-24c7-4388-baec-2e87135dc908'
+    )
     principalType: 'User'
     description: 'Role assignment for deployer – Cognitive Services User in Resource Group scope'
   }
@@ -380,7 +395,10 @@ module deployerRoleCognitiveServicesOpenAIUserRG 'br/public:avm/res/authorizatio
   name: 'deployer-role-cognitive-services-openai-user'
   params: {
     principalId: principalId
-    roleDefinitionIdOrName: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd')
+    roleDefinitionIdOrName: subscriptionResourceId(
+      'Microsoft.Authorization/roleDefinitions',
+      '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd'
+    )
     principalType: 'User'
     description: 'Role assignment for deployer – Cognitive Services OpenAI User in Resource Group scope'
   }

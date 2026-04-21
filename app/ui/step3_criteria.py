@@ -148,6 +148,9 @@ def _render_criteria_review():
         categories.setdefault(cat, []).append(c)
 
     # Category weight summary
+    if not categories:
+        st.info("No criteria categories found.")
+        return
     cat_cols = st.columns(min(len(categories), 4))
     for i, (cat_name, cat_criteria) in enumerate(categories.items()):
         col_idx = i % min(len(categories), 4)
@@ -263,9 +266,27 @@ def _run_criteria_extraction():
                 )
             )
 
+            criteria_count = len(criteria_dict.get("criteria", []))
+
+            if criteria_count == 0:
+                # No criteria found — likely not a valid RFP document
+                with status_placeholder.container():
+                    st.progress(100)
+                    st.error(
+                        "❌ **No evaluation criteria could be extracted.**\n\n"
+                        "The uploaded file does not appear to be a valid RFP document, "
+                        "or it does not contain identifiable evaluation criteria.\n\n"
+                        "Please go back to **Step 1** and upload a proper RFP file."
+                    )
+                pipeline_span.set_attribute("pipeline.status", "no_criteria")
+                logger.warning(
+                    "Criteria extraction returned 0 criteria — file may not be a valid RFP"
+                )
+                st.session_state.is_processing = False
+                return
+
             with status_placeholder.container():
-                progress_bar = st.progress(100)
-                criteria_count = len(criteria_dict.get("criteria", []))
+                st.progress(100)
                 st.success(
                     f"✅ Extracted **{criteria_count} criteria** in "
                     f"{format_duration(duration)}"
@@ -276,13 +297,13 @@ def _run_criteria_extraction():
             st.session_state.step_durations["criteria_extraction"] = duration
 
             total_duration = time.time() - pipeline_start
-            pipeline_span.set_attribute("pipeline.criteria_count", len(criteria_dict.get("criteria", [])))
+            pipeline_span.set_attribute("pipeline.criteria_count", criteria_count)
             pipeline_span.set_attribute("pipeline.duration_seconds", total_duration)
             pipeline_span.set_attribute("pipeline.status", "success")
             logger.info(
                 "====== CRITERIA EXTRACTION COMPLETED in %.2fs - %d criteria ======",
                 total_duration,
-                len(criteria_dict.get("criteria", [])),
+                criteria_count,
             )
 
             st.session_state.is_processing = False
