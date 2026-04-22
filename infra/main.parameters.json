@@ -17,6 +17,9 @@
       "reasoningModelVersion": {
         "value": "${AZURE_REASONING_MODEL_VERSION=2026-03-05}"
       },
+      "principalId": {
+        "value": "${AZURE_PRINCIPAL_ID}"
+      },
       "rfpAnalyzerExists": {
         "value": "${SERVICE_RFP_ANALYZER_RESOURCE_EXISTS=false}"
       }
