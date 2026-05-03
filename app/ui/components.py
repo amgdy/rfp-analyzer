@@ -1,5 +1,6 @@
 """Shared UI components for RFP Analyzer."""
 
+import uuid
 import streamlit as st
 import json
 
@@ -167,6 +168,10 @@ def render_sidebar():
                 disabled=st.session_state.is_processing,
             ):
                 logger.info("User initiated application reset")
+                # Generate a new session ID so blob restore doesn't undo the reset
+                new_session_id = uuid.uuid4().hex[:12]
+                st.session_state.session_id = new_session_id
+                st.query_params["session"] = new_session_id
                 st.session_state.step = 0
                 st.session_state.rfp_file = None
                 st.session_state.proposal_files = []
