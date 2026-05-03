@@ -169,7 +169,7 @@ def render_sidebar():
             ):
                 logger.info("User initiated application reset")
                 # Generate a new session ID so blob restore doesn't undo the reset
-                new_session_id = uuid.uuid4().hex[:12]
+                new_session_id = str(uuid.uuid4())
                 st.session_state.session_id = new_session_id
                 st.query_params["session"] = new_session_id
                 st.session_state.step = 0

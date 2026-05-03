@@ -39,15 +39,19 @@ logger = get_logger(__name__)
 # Default container name for RFP Analyzer sessions
 _DEFAULT_CONTAINER_NAME = "rfp-sessions"
 
-# Session IDs must be 8-32 alphanumeric characters (safe for blob paths)
-SESSION_ID_PATTERN = re.compile(r'^[a-zA-Z0-9]{8,32}$')
+# Session IDs: full UUIDs (with hyphens) or legacy 8-32 alphanumeric strings
+SESSION_ID_PATTERN = re.compile(
+    r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+    r'|^[a-zA-Z0-9]{8,32}$'
+)
 
 
 def is_valid_session_id(session_id: str) -> bool:
     """Validate a session ID format for safe use in blob paths.
 
-    Session IDs must be 8-32 alphanumeric characters to prevent
-    path traversal attacks.
+    Accepts standard UUID format (e.g. '550e8400-e29b-41d4-a716-446655440000')
+    or legacy 8-32 alphanumeric strings. This prevents path traversal attacks
+    in blob storage paths.
 
     Args:
         session_id: The session ID to validate.

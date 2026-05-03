@@ -64,21 +64,22 @@ st.set_page_config(
 
 import re
 
-# Session IDs must be 8-32 alphanumeric characters (safe for blob paths)
+# Session IDs must be valid UUIDs or 8-32 alphanumeric characters (safe for blob paths)
 def _get_or_create_session_id() -> str:
     """Get session ID from URL query params, or generate a new one.
 
     The session ID is persisted exclusively in the URL query string
     so that it survives page reloads and is never stored in memory alone.
-    Only alphanumeric session IDs (8-32 chars) are accepted to prevent
-    path traversal attacks in blob storage paths.
+    Uses full UUIDs (e.g. '550e8400-e29b-41d4-a716-446655440000') for
+    bullet-proof uniqueness. Legacy alphanumeric IDs (8-32 chars) are
+    also accepted for backwards compatibility.
     """
     params = st.query_params
     session_id = params.get("session")
     if session_id and is_valid_session_id(session_id):
         return session_id
-    # Generate a new session ID and persist it in the URL immediately
-    new_id = uuid.uuid4().hex[:12]
+    # Generate a new session ID (full UUID) and persist it in the URL immediately
+    new_id = str(uuid.uuid4())
     st.query_params["session"] = new_id
     return new_id
 
