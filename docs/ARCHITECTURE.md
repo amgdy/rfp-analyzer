@@ -93,16 +93,17 @@ The main entry point providing an interactive web interface:
 ```mermaid
 flowchart TB
     subgraph StreamlitApp["Streamlit Application"]
-        subgraph SSM["Session State Manager"]
-            DS["Document Storage"]
-            ER["Extraction Results"]
+        subgraph SSM["Session & Storage"]
+            SID["Session ID (URL query param)"]
+            BS["Azure Blob Storage<br>• Uploaded files<br>• Extracted text"]
+            ER["Extraction Results (cache)"]
             EVR["Evaluation Results"]
             UIS["UI State"]
         end
         
         subgraph Steps["Workflow Steps"]
-            S1["Step 1: Upload<br>• RFP file<br>• Proposals<br>• Preview"]
-            S2["Step 2: Extract<br>• Service selection<br>• Progress<br>• Results"]
+            S1["Step 1: Upload<br>• RFP file → Blob<br>• Proposals → Blob<br>• Preview"]
+            S2["Step 2: Extract<br>• Service selection<br>• Progress<br>• Results → Blob"]
             S3["Step 3: Criteria<br>• AI-extracted criteria<br>• Weights review<br>• User confirmation"]
             S4["Step 4: Score<br>• Proposal scoring<br>• Vendor comparison<br>• Export options"]
         end
@@ -330,13 +331,21 @@ flowchart TB
                 ACR --> CA
             end
             
-            MI["🔐 User-Assigned Managed Identity<br>• Azure AI Developer<br>• Cognitive Services User<br>• AcrPull"]
+            subgraph Storage["💾 Azure Storage"]
+                SA["Storage Account<br>• Standard_LRS<br>• StorageV2"]
+                BC["Blob Container:<br>rfp-sessions<br>• Uploaded docs<br>• Extracted text"]
+                SA --> BC
+            end
+            
+            MI["🔐 User-Assigned Managed Identity<br>• Azure AI Developer<br>• Cognitive Services User<br>• Storage Blob Data Contributor<br>• AcrPull"]
         end
     end
     
     MI -.-> AIFoundry
     MI -.-> ACR
+    MI -.-> SA
     CA -.-> AIFoundry
+    CA -.-> SA
     
     style Subscription fill:#e3f2fd,stroke:#1565c0
     style AIFoundry fill:#fff3e0,stroke:#ef6c00
@@ -471,9 +480,9 @@ flowchart TB
     CU & DI & TextRead --> Output
     
     subgraph Output["📄 Extracted Markdown"]
-        O1["Stored in session:"]
-        O2["• RFP content"]
-        O3["• Proposal contents[]"]
+        O1["Stored in Azure Blob Storage:"]
+        O2["• RFP content → &lt;session_id&gt;/extracted/rfp/"]
+        O3["• Proposal contents → &lt;session_id&gt;/extracted/proposals/"]
     end
     
     style DocProc fill:#e3f2fd,stroke:#1565c0
@@ -486,8 +495,8 @@ flowchart TB
 
 ```mermaid
 flowchart TB
-    subgraph Session["Session State"]
-        RFP["RFP Markdown"]
+    subgraph Session["Azure Blob Storage (Session)"]
+        RFP["RFP Markdown<br>&lt;session_id&gt;/extracted/rfp/"]
         P1["Proposal 1 Markdown"]
         PN["Proposal N Markdown"]
     end
@@ -1034,13 +1043,15 @@ sequenceDiagram
     participant AOAI as Azure OpenAI
     
     User->>UI: Upload RFP & Proposals
-    UI->>UI: Store in session state
+    UI->>UI: Generate session ID (in URL)
+    UI->>UI: Upload files to Azure Blob Storage
     
     User->>UI: Click "Extract"
+    UI->>UI: Download files from Blob
     UI->>DP: Process documents
     DP->>CU: Extract content
     CU-->>DP: Markdown content
-    DP-->>UI: Store extracted content
+    DP-->>UI: Store extracted content in Blob
     
     User->>UI: Click "Extract Criteria"
     UI->>CEA: Extract criteria from RFP

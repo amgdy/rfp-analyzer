@@ -51,7 +51,7 @@ def _load_extracted_content_from_blob():
     if not session_id:
         return
 
-    # Skip if already loaded
+    # Skip if both already loaded
     if st.session_state.rfp_content and st.session_state.proposal_contents:
         return
 
@@ -59,7 +59,7 @@ def _load_extracted_content_from_blob():
         from services.blob_storage_client import get_blob_storage_client
         client = get_blob_storage_client()
 
-        # Load RFP content
+        # Load RFP content if missing
         if not st.session_state.rfp_content and st.session_state.rfp_file:
             rfp_name = st.session_state.rfp_file["name"]
             content = client.get_extracted_rfp(session_id, rfp_name)
@@ -67,7 +67,7 @@ def _load_extracted_content_from_blob():
                 st.session_state.rfp_content = content
                 logger.info("Loaded RFP extracted content from blob: %s", rfp_name)
 
-        # Load proposal contents
+        # Load proposal contents if missing
         if not st.session_state.proposal_contents and st.session_state.proposal_files:
             proposal_contents = {}
             for pf in st.session_state.proposal_files:

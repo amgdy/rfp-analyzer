@@ -70,8 +70,9 @@ def _get_or_create_session_id() -> str:
     session_id = params.get("session")
     if session_id:
         return session_id
-    # Generate a new session ID and set it in the URL
+    # Generate a new session ID and persist it in the URL immediately
     new_id = uuid.uuid4().hex[:12]
+    st.query_params["session"] = new_id
     return new_id
 
 
