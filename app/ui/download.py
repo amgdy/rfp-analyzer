@@ -16,7 +16,7 @@ Report types:
 
 import streamlit as st
 
-from services.blob_storage_client import get_blob_storage_client
+from services.blob_storage_client import get_blob_storage_client, is_valid_session_id
 from services.session_state_manager import get_session_manager
 from services.logging_config import get_logger
 
@@ -32,7 +32,6 @@ def render_download_page():
     Reads 'session' and 'download' from query params and generates
     a time-limited SAS URL for the requested report.
     """
-    import re
     session_id = st.query_params.get("session")
     report_type = st.query_params.get("download")
 
@@ -41,7 +40,7 @@ def render_download_page():
         return
 
     # Validate session ID format (alphanumeric, 8-32 chars)
-    if not re.match(r'^[a-zA-Z0-9]{8,32}$', session_id):
+    if not is_valid_session_id(session_id):
         st.error("❌ Invalid session ID format.")
         return
 

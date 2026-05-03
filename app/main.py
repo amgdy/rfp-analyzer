@@ -24,6 +24,7 @@ from services.telemetry import setup_telemetry, _get_app_version
 setup_telemetry()
 
 from services.document_processor import ExtractionService
+from services.blob_storage_client import is_valid_session_id
 
 # Import UI modules
 from ui.landing import render_landing_page
@@ -64,9 +65,6 @@ st.set_page_config(
 import re
 
 # Session IDs must be 8-32 alphanumeric characters (safe for blob paths)
-_SESSION_ID_PATTERN = re.compile(r'^[a-zA-Z0-9]{8,32}$')
-
-
 def _get_or_create_session_id() -> str:
     """Get session ID from URL query params, or generate a new one.
 
@@ -77,7 +75,7 @@ def _get_or_create_session_id() -> str:
     """
     params = st.query_params
     session_id = params.get("session")
-    if session_id and _SESSION_ID_PATTERN.match(session_id):
+    if session_id and is_valid_session_id(session_id):
         return session_id
     # Generate a new session ID and persist it in the URL immediately
     new_id = uuid.uuid4().hex[:12]
