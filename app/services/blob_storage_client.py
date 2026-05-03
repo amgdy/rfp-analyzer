@@ -286,7 +286,9 @@ class BlobStorageClient:
         Returns:
             The blob path where the report was stored.
         """
-        blob_path = f"{session_id}/reports/{filename}"
+        # Sanitize filename to prevent path traversal
+        safe_filename = os.path.basename(filename)
+        blob_path = f"{session_id}/reports/{safe_filename}"
         blob_client = self._container_client.get_blob_client(blob_path)
         blob_client.upload_blob(
             data,

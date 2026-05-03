@@ -32,11 +32,17 @@ def render_download_page():
     Reads 'session' and 'download' from query params and generates
     a time-limited SAS URL for the requested report.
     """
+    import re
     session_id = st.query_params.get("session")
     report_type = st.query_params.get("download")
 
     if not session_id:
         st.error("❌ No session ID provided. Add `?session=<id>` to the URL.")
+        return
+
+    # Validate session ID format (alphanumeric, 8-32 chars)
+    if not re.match(r'^[a-zA-Z0-9]{8,32}$', session_id):
+        st.error("❌ Invalid session ID format.")
         return
 
     if not report_type:

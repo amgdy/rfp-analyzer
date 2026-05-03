@@ -61,15 +61,23 @@ st.set_page_config(
 )
 
 
+import re
+
+# Session IDs must be 8-32 alphanumeric characters (safe for blob paths)
+_SESSION_ID_PATTERN = re.compile(r'^[a-zA-Z0-9]{8,32}$')
+
+
 def _get_or_create_session_id() -> str:
     """Get session ID from URL query params, or generate a new one.
 
     The session ID is persisted exclusively in the URL query string
     so that it survives page reloads and is never stored in memory alone.
+    Only alphanumeric session IDs (8-32 chars) are accepted to prevent
+    path traversal attacks in blob storage paths.
     """
     params = st.query_params
     session_id = params.get("session")
-    if session_id:
+    if session_id and _SESSION_ID_PATTERN.match(session_id):
         return session_id
     # Generate a new session ID and persist it in the URL immediately
     new_id = uuid.uuid4().hex[:12]
@@ -218,7 +226,7 @@ def _restore_session_from_blob(session_id: str):
         logger.info("Session %s restored successfully (step %d)", session_id, saved_step)
 
     except Exception as e:
-        logger.debug("Could not restore session from blob: %s", str(e))
+        logger.warning("Could not restore session from blob: %s", str(e))
 
 
 if __name__ == "__main__":
