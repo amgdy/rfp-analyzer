@@ -1072,14 +1072,100 @@ def render_export_options(comparison: dict, evaluations: list):
     st.markdown("---")
     st.markdown("### 🔗 Shareable Report Links")
     st.markdown(
-        "Reports are stored permanently in the cloud. Use the link below to access "
-        "the download page with time-limited URLs (valid for 60 minutes per click)."
+        "Reports are stored permanently in the cloud. Click below to generate "
+        "time-limited download URLs (valid for 60 minutes)."
     )
     session_id = st.session_state.session_id
     if session_id:
-        download_url = f"?session={session_id}&download="
-        st.code(f"Download page: ?session={session_id}&download=full_analysis", language=None)
+        _render_shareable_download_links(session_id)
+
+
+def _render_shareable_download_links(session_id: str):
+    """Render clickable SAS download links for all stored reports."""
+    try:
+        from services.blob_storage_client import get_blob_storage_client
+        from services.session_state_manager import get_session_manager
+
+        mgr = get_session_manager(session_id)
+        state = mgr.load()
+        reports = state.get("reports", {})
+        client = get_blob_storage_client()
+
+        has_links = False
+
+        # Full analysis report
+        if reports.get("full_analysis"):
+            entry = reports["full_analysis"]
+            url = client.generate_download_url(
+                entry["blob_path"], expiry_minutes=60, filename=entry.get("filename")
+            )
+            if url:
+                has_links = True
+                st.link_button(
+                    "📑 Download Full Analysis Report",
+                    url,
+                    use_container_width=True,
+                )
+
+        # CSV comparison
+        if reports.get("csv_comparison"):
+            entry = reports["csv_comparison"]
+            url = client.generate_download_url(
+                entry["blob_path"], expiry_minutes=60, filename=entry.get("filename")
+            )
+            if url:
+                has_links = True
+                st.link_button(
+                    "📊 Download CSV Comparison",
+                    url,
+                    use_container_width=True,
+                )
+
+        # JSON data
+        if reports.get("json_data"):
+            entry = reports["json_data"]
+            url = client.generate_download_url(
+                entry["blob_path"], expiry_minutes=60, filename=entry.get("filename")
+            )
+            if url:
+                has_links = True
+                st.link_button(
+                    "📋 Download Evaluation Data (JSON)",
+                    url,
+                    use_container_width=True,
+                )
+
+        # Vendor reports
+        vendor_reports = reports.get("vendor_reports", [])
+        if vendor_reports:
+            st.markdown("**Individual Vendor Reports:**")
+            cols = st.columns(min(len(vendor_reports), 4))
+            for i, vr in enumerate(vendor_reports):
+                with cols[i % min(len(vendor_reports), 4)]:
+                    url = client.generate_download_url(
+                        vr["blob_path"], expiry_minutes=60, filename=vr.get("filename")
+                    )
+                    if url:
+                        has_links = True
+                        vendor_name = vr.get("vendor_name", "Unknown")
+                        st.link_button(
+                            f"📄 {vendor_name[:20]}",
+                            url,
+                            use_container_width=True,
+                        )
+
+        if has_links:
+            st.caption("⏱️ Links are valid for 60 minutes. Refresh the page to generate new links.")
+            st.info(
+                f"💡 **Share this session:** Send the URL `?session={session_id}&download=full_analysis` "
+                "to stakeholders for on-demand report access."
+            )
+        else:
+            st.caption("Reports are being stored. Refresh the page to see download links.")
+
+    except Exception as e:
+        logger.debug("Could not render download links: %s", str(e))
         st.caption(
-            "Share the session ID with stakeholders. They can access the download page "
-            "which generates fresh time-limited links on each visit."
+            f"💡 Share the session ID `{session_id}` with stakeholders. "
+            "They can access `?session=<id>&download=full_analysis` for time-limited downloads."
         )
