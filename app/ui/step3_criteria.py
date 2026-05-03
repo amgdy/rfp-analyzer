@@ -296,6 +296,16 @@ def _run_criteria_extraction():
             st.session_state.extracted_criteria = criteria_dict
             st.session_state.step_durations["criteria_extraction"] = duration
 
+            # Persist criteria state to blob
+            try:
+                from services.session_state_manager import get_session_manager
+                session_id = st.session_state.session_id
+                mgr = get_session_manager(session_id)
+                mgr.load()
+                mgr.save_criteria(criteria_data=criteria_dict, duration_seconds=duration)
+            except Exception as state_err:
+                logger.debug("Failed to save criteria state: %s", str(state_err))
+
             total_duration = time.time() - pipeline_start
             pipeline_span.set_attribute("pipeline.criteria_count", criteria_count)
             pipeline_span.set_attribute("pipeline.duration_seconds", total_duration)

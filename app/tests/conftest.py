@@ -136,6 +136,8 @@ _blob.BlobServiceClient = _BlobServiceClient
 _blob.ContainerClient = type("ContainerClient", (), {})
 _blob.generate_container_sas = type("generate_container_sas", (), {})
 _blob.ContainerSasPermissions = type("ContainerSasPermissions", (), {})
+_blob.generate_blob_sas = lambda **kw: "sas_token_stub"
+_blob.BlobSasPermissions = type("BlobSasPermissions", (), {"__init__": lambda self, **kw: None})
 
 # azure.storage.blob.aio
 sys.modules["azure.storage.blob.aio"].ContainerClient = type("ContainerClient", (), {})

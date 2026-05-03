@@ -16,10 +16,16 @@ Storage structure:
 """
 
 import os
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from azure.identity import DefaultAzureCredential
-from azure.storage.blob import BlobServiceClient, ContainerClient
+from azure.storage.blob import (
+    BlobServiceClient,
+    ContainerClient,
+    generate_blob_sas,
+    BlobSasPermissions,
+)
 from dotenv import load_dotenv
 
 from .logging_config import get_logger
@@ -263,6 +269,98 @@ class BlobStorageClient:
         if data is not None:
             return data.decode("utf-8")
         return None
+
+    # ── Report storage operations ──────────────────────────────────────────
+
+    def upload_report(
+        self, session_id: str, filename: str, data: bytes, content_type: str = "application/octet-stream"
+    ) -> str:
+        """Upload a generated report to blob storage.
+
+        Args:
+            session_id: The unique session identifier.
+            filename: Report filename (e.g., 'full_analysis_report.docx').
+            data: Report content as bytes.
+            content_type: MIME type for the blob.
+
+        Returns:
+            The blob path where the report was stored.
+        """
+        blob_path = f"{session_id}/reports/{filename}"
+        blob_client = self._container_client.get_blob_client(blob_path)
+        blob_client.upload_blob(
+            data,
+            overwrite=True,
+            content_settings={"content_type": content_type},
+        )
+        logger.info("Uploaded report to blob: %s (%d bytes)", blob_path, len(data))
+        return blob_path
+
+    # ── SAS URL generation ─────────────────────────────────────────────────
+
+    def generate_download_url(
+        self, blob_path: str, expiry_minutes: int = 60, filename: Optional[str] = None
+    ) -> Optional[str]:
+        """Generate a time-limited SAS download URL for a blob.
+
+        Uses user delegation key when using DefaultAzureCredential,
+        or account key when using connection string.
+
+        Args:
+            blob_path: Full blob path within the container.
+            expiry_minutes: How long the URL remains valid (default: 60 min).
+            filename: Optional content-disposition filename for download.
+
+        Returns:
+            A full HTTPS URL with SAS token, or None if generation fails.
+        """
+        try:
+            expiry = datetime.now(timezone.utc) + timedelta(minutes=expiry_minutes)
+            start = datetime.now(timezone.utc) - timedelta(minutes=5)
+
+            # Try user delegation key first (Managed Identity / DefaultAzureCredential)
+            try:
+                delegation_key = self._service_client.get_user_delegation_key(
+                    key_start_time=start,
+                    key_expiry_time=expiry,
+                )
+                sas_token = generate_blob_sas(
+                    account_name=self._service_client.account_name,
+                    container_name=self.container_name,
+                    blob_name=blob_path,
+                    user_delegation_key=delegation_key,
+                    permission=BlobSasPermissions(read=True),
+                    expiry=expiry,
+                    start=start,
+                    content_disposition=f'attachment; filename="{filename}"' if filename else None,
+                )
+            except Exception:
+                # Fall back to account key (connection string auth)
+                account_key = self._service_client.credential.account_key if hasattr(
+                    self._service_client.credential, 'account_key'
+                ) else None
+                if not account_key:
+                    logger.warning("Cannot generate SAS URL: no account key or delegation key available")
+                    return None
+
+                sas_token = generate_blob_sas(
+                    account_name=self._service_client.account_name,
+                    container_name=self.container_name,
+                    blob_name=blob_path,
+                    account_key=account_key,
+                    permission=BlobSasPermissions(read=True),
+                    expiry=expiry,
+                    start=start,
+                    content_disposition=f'attachment; filename="{filename}"' if filename else None,
+                )
+
+            url = f"{self._service_client.url}{self.container_name}/{blob_path}?{sas_token}"
+            logger.debug("Generated SAS URL for %s (expires in %d min)", blob_path, expiry_minutes)
+            return url
+
+        except Exception as e:
+            logger.error("Failed to generate SAS URL for %s: %s", blob_path, str(e))
+            return None
 
 
 # ── Module-level singleton ─────────────────────────────────────────────────

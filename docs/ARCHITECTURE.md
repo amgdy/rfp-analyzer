@@ -7,6 +7,7 @@ This document provides a comprehensive overview of the RFP Analyzer application 
 - [System Overview](#system-overview)
 - [Application Architecture](#application-architecture)
 - [Component Architecture](#component-architecture)
+- [Session State & Persistence](#session-state--persistence)
 - [Multi-Agent System](#multi-agent-system)
 - [Azure Infrastructure](#azure-infrastructure)
 - [Data Flow](#data-flow)
@@ -211,6 +212,81 @@ flowchart TB
     
     style CompAgent fill:#e8eaf6,stroke:#283593
 ```
+
+---
+
+## Session State & Persistence
+
+The application persists all workflow state to Azure Blob Storage as a JSON state file, enabling:
+
+1. **Resume from any step** — If the browser is closed or session state is lost, reopening the same URL (`?session=<id>`) restores the workflow at the last completed step.
+2. **Permanent report links** — Generated reports (Word, CSV, JSON) are stored in blob storage with permanent blob paths. Time-limited SAS URLs are generated on-demand for secure downloads.
+3. **Session audit trail** — The state file records timestamps, durations, and configuration for each pipeline stage.
+
+### Storage Structure
+
+```
+<container: rfp-sessions>/
+  <session_id>/
+    state.json                          ← Session state (JSON)
+    uploads/
+      rfp/<filename>                    ← Original uploaded RFP
+      proposals/<filename>              ← Original uploaded proposals
+    extracted/
+      rfp/<filename>.md                 ← Extracted RFP text
+      proposals/<filename>.md           ← Extracted proposal text
+    reports/
+      rfp_full_analysis_report.docx     ← Full analysis Word doc
+      vendor_comparison.csv             ← CSV comparison
+      evaluation_data.json              ← Full JSON data export
+      report_<vendor_name>.docx         ← Per-vendor Word reports
+```
+
+### State File Schema (`state.json`)
+
+```json
+{
+  "version": "1.0",
+  "session_id": "abc123def456",
+  "created_at": "2024-01-15T10:30:00+00:00",
+  "updated_at": "2024-01-15T11:45:00+00:00",
+  "current_step": 4,
+  "config": {
+    "extraction_service": "document_intelligence",
+    "reasoning_effort": "high",
+    "global_criteria": ""
+  },
+  "uploads": {
+    "rfp": {"name": "rfp.pdf", "size": 52000, "blob_path": "..."},
+    "proposals": [{"name": "vendor_a.pdf", "size": 31000, "blob_path": "..."}]
+  },
+  "extraction": {"completed": true, "duration_seconds": 15.2},
+  "criteria": {"completed": true, "criteria_count": 8, "criteria_data": {...}},
+  "evaluation": {"completed": true, "results": [...], "comparison": {...}},
+  "reports": {
+    "full_analysis": {"blob_path": "...", "filename": "...", "generated_at": "..."},
+    "csv_comparison": {"blob_path": "...", "filename": "...", "generated_at": "..."},
+    "json_data": {"blob_path": "...", "filename": "...", "generated_at": "..."},
+    "vendor_reports": [{"vendor_name": "...", "blob_path": "...", "filename": "..."}]
+  },
+  "step_durations": {"extraction_total": 15.2, "criteria_extraction": 8.1}
+}
+```
+
+### Download Handler
+
+Reports can be accessed via permanent URLs:
+
+```
+/?session=<session_id>&download=full_analysis
+/?session=<session_id>&download=csv_comparison
+/?session=<session_id>&download=json_data
+/?session=<session_id>&download=vendor_report_<vendor_name>
+```
+
+Each access generates a fresh time-limited SAS token (60-minute expiry) using either:
+- **User Delegation Key** (Managed Identity in production)
+- **Account Key** (connection string in local dev)
 
 ---
 

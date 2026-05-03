@@ -160,7 +160,46 @@ def render_step1():
             logger.info("User proceeding to Step 2 - RFP: %s, Proposals: %d",
                        st.session_state.rfp_file['name'],
                        len(st.session_state.proposal_files))
+            # Persist session state to blob
+            _save_session_state(session_id)
             st.session_state.step = 2
             st.rerun()
     else:
         st.info("📌 Please upload an RFP file and at least one vendor proposal to continue.")
+
+
+def _save_session_state(session_id: str):
+    """Save upload state to persistent blob storage."""
+    try:
+        from services.session_state_manager import get_session_manager
+        mgr = get_session_manager(session_id)
+        mgr.load()
+
+        rfp_meta = None
+        if st.session_state.rfp_file:
+            rfp_meta = {
+                "name": st.session_state.rfp_file["name"],
+                "size": st.session_state.rfp_file.get("size", 0),
+                "blob_path": f"{session_id}/uploads/rfp/{st.session_state.rfp_file['name']}",
+            }
+
+        proposals_meta = [
+            {
+                "name": p["name"],
+                "size": p.get("size", 0),
+                "blob_path": f"{session_id}/uploads/proposals/{p['name']}",
+            }
+            for p in st.session_state.proposal_files
+        ]
+
+        mgr.save_upload(rfp=rfp_meta, proposals=proposals_meta)
+        mgr.save_config(
+            extraction_service=st.session_state.extraction_service.value
+            if hasattr(st.session_state.extraction_service, 'value')
+            else str(st.session_state.extraction_service),
+            reasoning_effort=st.session_state.reasoning_effort,
+            global_criteria=st.session_state.global_criteria,
+        )
+        logger.info("Saved session state after upload step")
+    except Exception as e:
+        logger.debug("Failed to save session state: %s", str(e))

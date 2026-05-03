@@ -5,6 +5,7 @@ import asyncio
 import time
 import uuid
 import json
+from typing import Optional
 
 from services.utils import format_duration
 from services.comparison_agent import ComparisonAgent, generate_word_report, generate_full_analysis_report
@@ -317,6 +318,25 @@ def run_evaluation_pipeline():
 
             logger.info("====== SCORING PIPELINE COMPLETED in %.2fs ======", total_duration)
 
+            # Persist evaluation state to blob
+            try:
+                from services.session_state_manager import get_session_manager
+                session_id = st.session_state.session_id
+                mgr = get_session_manager(session_id)
+                mgr.load()
+                mgr.save_evaluation(
+                    results=qualified_results,
+                    disqualified=disqualified_results,
+                    comparison=st.session_state.comparison_results,
+                    duration_seconds=total_duration,
+                )
+                mgr.save_step_durations(st.session_state.step_durations)
+            except Exception as state_err:
+                logger.debug("Failed to save evaluation state: %s", str(state_err))
+
+            # Generate and store reports to blob storage
+            _store_reports_to_blob(qualified_results, st.session_state.comparison_results)
+
             # Final render
             render_status()
 
@@ -335,6 +355,69 @@ def run_evaluation_pipeline():
             st.session_state.is_processing = False
             render_status()
             st.error("❌ Error during evaluation. Please check the logs and try again.")
+
+
+def _store_reports_to_blob(evaluations: list, comparison: Optional[dict] = None):
+    """Generate reports and store them in blob storage for permanent download links."""
+    try:
+        from services.blob_storage_client import get_blob_storage_client
+        from services.session_state_manager import get_session_manager
+
+        session_id = st.session_state.session_id
+        if not session_id:
+            return
+
+        client = get_blob_storage_client()
+        mgr = get_session_manager(session_id)
+        mgr.load()
+
+        # Store full analysis report (Word)
+        if comparison and evaluations:
+            full_report = generate_full_analysis_report(comparison, evaluations)
+            if full_report:
+                blob_path = client.upload_report(
+                    session_id, "rfp_full_analysis_report.docx", full_report,
+                    content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                )
+                mgr.save_report("full_analysis", blob_path, "rfp_full_analysis_report.docx")
+
+        # Store CSV comparison
+        if comparison and evaluations:
+            comparison_agent = ComparisonAgent()
+            csv_content = comparison_agent.generate_csv_report(comparison, evaluations)
+            if csv_content:
+                blob_path = client.upload_report(
+                    session_id, "vendor_comparison.csv",
+                    csv_content.encode("utf-8") if isinstance(csv_content, str) else csv_content,
+                    content_type="text/csv",
+                )
+                mgr.save_report("csv_comparison", blob_path, "vendor_comparison.csv")
+
+        # Store JSON data
+        full_data = {"comparison": comparison, "evaluations": evaluations}
+        json_bytes = json.dumps(full_data, indent=2, default=str).encode("utf-8")
+        blob_path = client.upload_report(
+            session_id, "evaluation_data.json", json_bytes,
+            content_type="application/json",
+        )
+        mgr.save_report("json_data", blob_path, "evaluation_data.json")
+
+        # Store individual vendor reports
+        for eval_result in evaluations:
+            vendor_name = eval_result.get("supplier_name", "Unknown").replace(" ", "_")
+            word_doc = generate_word_report(eval_result)
+            if word_doc:
+                filename = f"report_{vendor_name}.docx"
+                blob_path = client.upload_report(
+                    session_id, filename, word_doc,
+                    content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                )
+                mgr.save_report("vendor_report", blob_path, filename, vendor_name=vendor_name)
+
+        logger.info("Stored all reports to blob storage for session %s", session_id)
+
+    except Exception as e:
+        logger.error("Failed to store reports to blob: %s", str(e))
 
 
 # ---------------------------------------------------------------------------
@@ -984,3 +1067,19 @@ def render_export_options(comparison: dict, evaluations: list):
                 )
             else:
                 st.caption(f"Not available for {vendor_name[:15]}")
+
+    # Permanent shareable links section
+    st.markdown("---")
+    st.markdown("### 🔗 Shareable Report Links")
+    st.markdown(
+        "Reports are stored permanently in the cloud. Use the link below to access "
+        "the download page with time-limited URLs (valid for 60 minutes per click)."
+    )
+    session_id = st.session_state.session_id
+    if session_id:
+        download_url = f"?session={session_id}&download="
+        st.code(f"Download page: ?session={session_id}&download=full_analysis", language=None)
+        st.caption(
+            "Share the session ID with stakeholders. They can access the download page "
+            "which generates fresh time-limited links on each visit."
+        )

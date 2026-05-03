@@ -423,6 +423,20 @@ def run_extraction_pipeline():
 
             logger.info("====== EXTRACTION PIPELINE COMPLETED in %.2fs ======", total_duration)
 
+            # Persist extraction state to blob
+            try:
+                from services.session_state_manager import get_session_manager
+                mgr = get_session_manager(session_id)
+                mgr.load()
+                mgr.save_extraction_complete(
+                    rfp_extracted=True,
+                    proposals_extracted=[f["name"] for f in st.session_state.proposal_files],
+                    duration_seconds=total_duration,
+                )
+                mgr.save_step_durations(st.session_state.step_durations)
+            except Exception as state_err:
+                logger.debug("Failed to save extraction state: %s", str(state_err))
+
             # Show completion message
             st.success(f"✅ **All {total_files} documents extracted in {format_duration(total_duration)}!**")
 
