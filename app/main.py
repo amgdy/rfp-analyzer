@@ -181,7 +181,7 @@ def _restore_session_from_blob(session_id: str):
             try:
                 st.session_state.extraction_service = ExtractionService(config["extraction_service"])
             except ValueError:
-                pass
+                logger.warning("Unknown extraction service in saved state: %s", config["extraction_service"])
         if config.get("reasoning_effort"):
             st.session_state.reasoning_effort = config["reasoning_effort"]
         if config.get("global_criteria"):

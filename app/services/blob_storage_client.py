@@ -354,7 +354,7 @@ class BlobStorageClient:
                     content_disposition=f'attachment; filename="{filename}"' if filename else None,
                 )
 
-            url = f"{self._service_client.url}{self.container_name}/{blob_path}?{sas_token}"
+            url = f"{self._service_client.url.rstrip('/')}/{self.container_name}/{blob_path}?{sas_token}"
             logger.debug("Generated SAS URL for %s (expires in %d min)", blob_path, expiry_minutes)
             return url
 
