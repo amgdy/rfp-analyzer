@@ -62,8 +62,6 @@ st.set_page_config(
 )
 
 
-import re
-
 # Session IDs must be valid UUIDs or 8-32 alphanumeric characters (safe for blob paths)
 def _get_or_create_session_id() -> str:
     """Get session ID from URL query params, or generate a new one.
