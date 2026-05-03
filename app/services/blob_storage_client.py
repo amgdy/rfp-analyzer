@@ -23,6 +23,7 @@ from typing import Optional
 from azure.identity import DefaultAzureCredential
 from azure.storage.blob import (
     BlobServiceClient,
+    ContentSettings,
     ContainerClient,
     generate_blob_sas,
     BlobSasPermissions,
@@ -312,7 +313,7 @@ class BlobStorageClient:
         blob_client.upload_blob(
             data,
             overwrite=True,
-            content_settings={"content_type": content_type},
+            content_settings=ContentSettings(content_type=content_type),
         )
         logger.info("Uploaded report to blob: %s (%d bytes)", blob_path, len(data))
         return blob_path

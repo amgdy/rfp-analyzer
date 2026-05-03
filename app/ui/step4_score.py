@@ -990,90 +990,118 @@ def render_detailed_scores(evaluations: list):
 
 
 def render_export_options(comparison: dict, evaluations: list):
-    """Render export options for reports."""
+    """Render export options for reports with improved card-based UX."""
     st.subheader("📥 Export Reports")
+    st.markdown(
+        "Download your evaluation reports in multiple formats. "
+        "All reports are also stored in the cloud for permanent access."
+    )
 
-    # Full Analysis Report (with comparison)
-    st.markdown("### 📑 Full Analysis Report")
-    st.markdown("Complete report including comparison, rankings, and all vendor details.")
-
-    if comparison and evaluations:
-        full_report = generate_full_analysis_report(comparison, evaluations)
-        if full_report:
-            st.download_button(
-                label="📑 Download Full Analysis Report (Word)",
-                data=full_report,
-                file_name="rfp_full_analysis_report.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                use_container_width=True,
-                key="full_analysis_report"
-            )
-        else:
-            st.caption("Word export not available. Install python-docx with: pip install python-docx")
-
-    st.markdown("---")
+    # ── Primary Reports ──────────────────────────────────────────────────
+    st.markdown("#### 📑 Primary Reports")
 
     col1, col2, col3 = st.columns(3)
 
     with col1:
-        st.markdown("### 📊 CSV Comparison")
-        if comparison and evaluations:
-            comparison_agent = ComparisonAgent()
-            csv_content = comparison_agent.generate_csv_report(comparison, evaluations)
-            st.download_button(
-                label="📊 Download CSV",
-                data=csv_content,
-                file_name="vendor_comparison.csv",
-                mime="text/csv",
-                use_container_width=True
-            )
+        with st.container(border=True):
+            st.markdown("##### 📑 Full Analysis")
+            st.caption("Word Document • Comprehensive report with comparison, rankings, and vendor details")
+            if comparison and evaluations:
+                full_report = generate_full_analysis_report(comparison, evaluations)
+                if full_report:
+                    size_kb = len(full_report) / 1024
+                    st.caption(f"📦 {size_kb:.0f} KB")
+                    st.download_button(
+                        label="⬇️ Download .docx",
+                        data=full_report,
+                        file_name="rfp_full_analysis_report.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        use_container_width=True,
+                        key="full_analysis_report",
+                    )
+                else:
+                    st.info("Word export requires python-docx")
 
     with col2:
-        st.markdown("### 📋 JSON Data")
-        full_data = {
-            "comparison": comparison,
-            "evaluations": evaluations
-        }
-        st.download_button(
-            label="📋 Download JSON",
-            data=json.dumps(full_data, indent=2),
-            file_name="evaluation_data.json",
-            mime="application/json",
-            use_container_width=True
-        )
+        with st.container(border=True):
+            st.markdown("##### 📊 CSV Comparison")
+            st.caption("Spreadsheet • Score matrix suitable for Excel or data analysis tools")
+            if comparison and evaluations:
+                comparison_agent = ComparisonAgent()
+                csv_content = comparison_agent.generate_csv_report(comparison, evaluations)
+                if csv_content:
+                    csv_bytes = csv_content.encode("utf-8") if isinstance(csv_content, str) else csv_content
+                    size_kb = len(csv_bytes) / 1024
+                    st.caption(f"📦 {size_kb:.0f} KB")
+                    st.download_button(
+                        label="⬇️ Download .csv",
+                        data=csv_content,
+                        file_name="vendor_comparison.csv",
+                        mime="text/csv",
+                        use_container_width=True,
+                        key="csv_export",
+                    )
 
     with col3:
-        st.markdown("### 📄 Individual Reports")
-        st.caption("Detailed Word report for each vendor")
+        with st.container(border=True):
+            st.markdown("##### 📋 JSON Data")
+            st.caption("Machine-readable • Full evaluation data for integrations or archival")
+            full_data = {
+                "comparison": comparison,
+                "evaluations": evaluations,
+            }
+            json_str = json.dumps(full_data, indent=2)
+            size_kb = len(json_str.encode("utf-8")) / 1024
+            st.caption(f"📦 {size_kb:.0f} KB")
+            st.download_button(
+                label="⬇️ Download .json",
+                data=json_str,
+                file_name="evaluation_data.json",
+                mime="application/json",
+                use_container_width=True,
+                key="json_export",
+            )
 
-    # Individual vendor reports in a separate section
-    st.markdown("### 📄 Individual Vendor Reports (Word)")
-    st.markdown("Detailed reports with criterion justifications for each vendor.")
-
-    vendor_cols = st.columns(min(len(evaluations), 4))
-    for i, eval_result in enumerate(evaluations):
-        col_idx = i % min(len(evaluations), 4)
-        with vendor_cols[col_idx]:
-            vendor_name = eval_result.get("supplier_name", f"Vendor_{i+1}").replace(" ", "_")
-            word_doc = generate_word_report(eval_result)
-            if word_doc:
-                st.download_button(
-                    label=f"📄 {vendor_name[:20]}",
-                    data=word_doc,
-                    file_name=f"report_{vendor_name}.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    use_container_width=True,
-                    key=f"word_{i}"
-                )
-            else:
-                st.caption(f"Not available for {vendor_name[:15]}")
-
-    # Permanent shareable links section
+    # ── Individual Vendor Reports ────────────────────────────────────────
     st.markdown("---")
-    st.markdown("### 🔗 Shareable Report Links")
+    st.markdown("#### 📄 Individual Vendor Reports")
+    st.caption("Detailed Word document per vendor with criterion justifications, strengths, and gaps.")
+
+    num_vendors = len(evaluations)
+    cols_per_row = min(num_vendors, 4)
+    vendor_cols = st.columns(cols_per_row)
+
+    for i, eval_result in enumerate(evaluations):
+        col_idx = i % cols_per_row
+        with vendor_cols[col_idx]:
+            vendor_name = eval_result.get("supplier_name", f"Vendor_{i+1}")
+            safe_name = vendor_name.replace(" ", "_")
+            total_score = eval_result.get("total_score", 0)
+            grade = eval_result.get("grade", "N/A")
+            medal = "🥇" if i == 0 else "🥈" if i == 1 else "🥉" if i == 2 else "📄"
+
+            with st.container(border=True):
+                st.markdown(f"**{medal} {vendor_name[:22]}**")
+                st.caption(f"Score: {total_score:.1f} • Grade: {grade}")
+                word_doc = generate_word_report(eval_result)
+                if word_doc:
+                    st.download_button(
+                        label=f"⬇️ {safe_name[:18]}.docx",
+                        data=word_doc,
+                        file_name=f"report_{safe_name}.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        use_container_width=True,
+                        key=f"word_{i}",
+                    )
+                else:
+                    st.caption("Not available")
+
+    # ── Cloud Download Links ─────────────────────────────────────────────
+    st.markdown("---")
+    st.markdown("#### 🔗 Shareable Cloud Links")
     st.markdown(
-        "Reports are stored permanently in the cloud. Click below to generate "
-        "time-limited download URLs (valid for 60 minutes)."
+        "Reports are stored permanently in the cloud. Generate time-limited download "
+        "URLs (valid 60 min) to share with stakeholders who don't have app access."
     )
     session_id = st.session_state.session_id
     if session_id:
@@ -1081,7 +1109,10 @@ def render_export_options(comparison: dict, evaluations: list):
 
 
 def _render_shareable_download_links(session_id: str):
-    """Render clickable SAS download links for all stored reports."""
+    """Render clickable SAS download links for all stored reports.
+
+    Uses download_url from state if available, otherwise generates fresh ones.
+    """
     try:
         from services.blob_storage_client import get_blob_storage_client
         from services.session_state_manager import get_session_manager
@@ -1093,12 +1124,24 @@ def _render_shareable_download_links(session_id: str):
 
         has_links = False
 
+        def _get_url(entry: dict) -> Optional[str]:
+            """Get download URL from entry or generate a fresh one."""
+            # Use persisted URL if present (may be expired but try it)
+            url = entry.get("download_url")
+            if url:
+                return url
+            # Fall back to generating on the fly
+            blob_path = entry.get("blob_path")
+            if blob_path:
+                return client.generate_download_url(
+                    blob_path, expiry_minutes=60, filename=entry.get("filename")
+                )
+            return None
+
         # Full analysis report
         if reports.get("full_analysis"):
             entry = reports["full_analysis"]
-            url = client.generate_download_url(
-                entry["blob_path"], expiry_minutes=60, filename=entry.get("filename")
-            )
+            url = _get_url(entry)
             if url:
                 has_links = True
                 st.link_button(
@@ -1110,9 +1153,7 @@ def _render_shareable_download_links(session_id: str):
         # CSV comparison
         if reports.get("csv_comparison"):
             entry = reports["csv_comparison"]
-            url = client.generate_download_url(
-                entry["blob_path"], expiry_minutes=60, filename=entry.get("filename")
-            )
+            url = _get_url(entry)
             if url:
                 has_links = True
                 st.link_button(
@@ -1124,9 +1165,7 @@ def _render_shareable_download_links(session_id: str):
         # JSON data
         if reports.get("json_data"):
             entry = reports["json_data"]
-            url = client.generate_download_url(
-                entry["blob_path"], expiry_minutes=60, filename=entry.get("filename")
-            )
+            url = _get_url(entry)
             if url:
                 has_links = True
                 st.link_button(
@@ -1142,9 +1181,7 @@ def _render_shareable_download_links(session_id: str):
             cols = st.columns(min(len(vendor_reports), 4))
             for i, vr in enumerate(vendor_reports):
                 with cols[i % min(len(vendor_reports), 4)]:
-                    url = client.generate_download_url(
-                        vr["blob_path"], expiry_minutes=60, filename=vr.get("filename")
-                    )
+                    url = _get_url(vr)
                     if url:
                         has_links = True
                         vendor_name = vr.get("vendor_name", "Unknown")
@@ -1155,7 +1192,7 @@ def _render_shareable_download_links(session_id: str):
                         )
 
         if has_links:
-            st.caption("⏱️ Links are valid for 60 minutes. Refresh the page to generate new links.")
+            st.caption("⏱️ Links are valid for up to 24 hours. Refresh the page to regenerate if expired.")
             st.info(
                 f"💡 **Share this session:** Send the URL `?session={session_id}&download=full_analysis` "
                 "to stakeholders for on-demand report access."

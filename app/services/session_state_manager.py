@@ -295,7 +295,10 @@ class SessionStateManager:
         filename: str,
         vendor_name: Optional[str] = None,
     ) -> None:
-        """Save a generated report reference.
+        """Save a generated report reference with a download URL.
+
+        Generates a time-limited SAS download URL (24h) so the state.json
+        contains immediately usable links without needing extra API calls.
 
         Args:
             report_type: One of 'full_analysis', 'csv_comparison', 'json_data', 'vendor_report'.
@@ -304,11 +307,33 @@ class SessionStateManager:
             vendor_name: Vendor name (for vendor_report type only).
         """
         state = self.get_state()
+
+        # Ensure reports dict exists (handles older state schemas)
+        if "reports" not in state:
+            state["reports"] = {
+                "full_analysis": None,
+                "csv_comparison": None,
+                "json_data": None,
+                "vendor_reports": [],
+            }
+        if "vendor_reports" not in state["reports"]:
+            state["reports"]["vendor_reports"] = []
+
+        # Generate a download URL so the state is immediately usable
+        download_url = None
+        try:
+            download_url = self._client.generate_download_url(
+                blob_path, expiry_minutes=1440, filename=filename  # 24h expiry
+            )
+        except Exception as e:
+            logger.debug("Could not generate download URL for %s: %s", blob_path, str(e))
+
         report_entry = {
             "blob_path": blob_path,
             "filename": filename,
             "generated_at": _now_iso(),
             "type": report_type,
+            "download_url": download_url,
         }
 
         if report_type == "vendor_report":
