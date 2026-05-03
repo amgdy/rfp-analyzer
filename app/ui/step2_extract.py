@@ -41,12 +41,55 @@ flowchart TD
 """
 
 
+def _load_extracted_content_from_blob():
+    """Try to load previously extracted content from blob storage into session state.
+
+    This handles the case where session state is lost (e.g., page reload) but
+    the extracted content is still available in blob storage.
+    """
+    session_id = st.session_state.session_id
+    if not session_id:
+        return
+
+    # Skip if already loaded
+    if st.session_state.rfp_content and st.session_state.proposal_contents:
+        return
+
+    try:
+        from services.blob_storage_client import get_blob_storage_client
+        client = get_blob_storage_client()
+
+        # Load RFP content
+        if not st.session_state.rfp_content and st.session_state.rfp_file:
+            rfp_name = st.session_state.rfp_file["name"]
+            content = client.get_extracted_rfp(session_id, rfp_name)
+            if content:
+                st.session_state.rfp_content = content
+                logger.info("Loaded RFP extracted content from blob: %s", rfp_name)
+
+        # Load proposal contents
+        if not st.session_state.proposal_contents and st.session_state.proposal_files:
+            proposal_contents = {}
+            for pf in st.session_state.proposal_files:
+                content = client.get_extracted_proposal(session_id, pf["name"])
+                if content:
+                    proposal_contents[pf["name"]] = content
+            if proposal_contents:
+                st.session_state.proposal_contents = proposal_contents
+                logger.info("Loaded %d proposal extracted contents from blob", len(proposal_contents))
+    except Exception as e:
+        logger.debug("Could not load extracted content from blob: %s", str(e))
+
+
 def render_step2():
     """Step 2: Extract Content from Documents."""
     render_step_indicator(current_step=2)
 
     st.header("Step 2: Extract Content")
     st.markdown("Extract text content from uploaded documents using Azure AI services.")
+
+    # Try to load extracted content from blob (handles page reload)
+    _load_extracted_content_from_blob()
 
     # Show uploaded files summary
     col1, col2 = st.columns(2)
@@ -197,18 +240,25 @@ def _render_content_previews():
 def run_extraction_pipeline():
     """Run the document extraction pipeline with parallel processing and live progress."""
     from services.pipelines import process_document
+    from services.blob_storage_client import get_blob_storage_client
 
     extraction_service = st.session_state.extraction_service
-    logger.info("====== EXTRACTION PIPELINE STARTED (Service: %s) ======", extraction_service.value)
+    session_id = st.session_state.session_id
+    logger.info("====== EXTRACTION PIPELINE STARTED (Service: %s, Session: %s) ======",
+                extraction_service.value, session_id)
     pipeline_start = time.time()
 
     with tracer.start_as_current_span("extraction_pipeline") as pipeline_span:
         pipeline_span.set_attribute("pipeline.type", "extraction")
         pipeline_span.set_attribute("pipeline.extraction_service", extraction_service.value)
+        pipeline_span.set_attribute("pipeline.session_id", session_id)
         pipeline_span.set_attribute("pipeline.document_count", 1 + len(st.session_state.proposal_files))
 
         # Inject animation CSS
         st.markdown(STEP_ANIMATION_CSS, unsafe_allow_html=True)
+
+        # Get blob storage client to download files for extraction
+        blob_client = get_blob_storage_client()
 
         # Create extraction queue
         extraction_queue = ProcessingQueue(name="Document Extraction")
@@ -222,7 +272,7 @@ def run_extraction_pipeline():
             item_type="rfp",
             metadata={
                 "filename": rfp_file["name"],
-                "size": len(rfp_file["bytes"]),
+                "size": rfp_file.get("size", 0),
                 "request_id": rfp_request_id
             }
         )
@@ -237,7 +287,7 @@ def run_extraction_pipeline():
                 item_type="proposal",
                 metadata={
                     "filename": proposal_file["name"],
-                    "size": len(proposal_file["bytes"]),
+                    "size": proposal_file.get("size", 0),
                     "request_id": proposal_request_id
                 }
             )
@@ -254,8 +304,19 @@ def run_extraction_pipeline():
         status_placeholder = st.empty()
 
         try:
-            all_files = [rfp_file] + st.session_state.proposal_files
-            total_files = len(all_files)
+            # Download file bytes from blob storage
+            rfp_bytes = blob_client.download_rfp(session_id, rfp_file["name"])
+            if rfp_bytes is None:
+                raise Exception(f"RFP file not found in storage: {rfp_file['name']}")
+
+            all_file_data = [{"bytes": rfp_bytes, "name": rfp_file["name"]}]
+            for proposal_file in st.session_state.proposal_files:
+                proposal_bytes = blob_client.download_proposal(session_id, proposal_file["name"])
+                if proposal_bytes is None:
+                    raise Exception(f"Proposal file not found in storage: {proposal_file['name']}")
+                all_file_data.append({"bytes": proposal_bytes, "name": proposal_file["name"]})
+
+            total_files = len(all_file_data)
 
             # Mark all items as processing
             for item in extraction_queue.items:
@@ -264,7 +325,7 @@ def run_extraction_pipeline():
             # Define async function for parallel processing
             async def process_all_documents():
                 tasks = []
-                for file_data in all_files:
+                for file_data in all_file_data:
                     task = process_document(
                         file_data["bytes"],
                         file_data["name"],
@@ -337,14 +398,16 @@ def run_extraction_pipeline():
             if failed_items:
                 raise Exception(f"Failed to extract {len(failed_items)} document(s)")
 
-            # Store results
+            # Store extracted results to blob storage and session state
             rfp_content, rfp_duration = extracted_results[0]
+            blob_client.store_extracted_rfp(session_id, rfp_file["name"], rfp_content)
             st.session_state.rfp_content = rfp_content
             st.session_state.step_durations["rfp_processing"] = rfp_duration
 
             proposal_contents = {}
             for i, file_data in enumerate(st.session_state.proposal_files):
                 content, duration = extracted_results[i + 1]
+                blob_client.store_extracted_proposal(session_id, file_data["name"], content)
                 proposal_contents[file_data["name"]] = content
                 st.session_state.step_durations[f"proposal_{i}_processing"] = duration
 

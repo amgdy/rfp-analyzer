@@ -8,6 +8,8 @@ A comprehensive workflow for analyzing RFPs and scoring vendor proposals:
 4. AI-powered proposal scoring and multi-vendor comparison
 """
 
+import uuid
+
 import streamlit as st
 from pathlib import Path
 
@@ -57,6 +59,22 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+
+def _get_or_create_session_id() -> str:
+    """Get session ID from URL query params, or generate a new one.
+
+    The session ID is persisted exclusively in the URL query string
+    so that it survives page reloads and is never stored in memory alone.
+    """
+    params = st.query_params
+    session_id = params.get("session")
+    if session_id:
+        return session_id
+    # Generate a new session ID and set it in the URL
+    new_id = uuid.uuid4().hex[:12]
+    return new_id
+
+
 # Initialize session state
 if "step" not in st.session_state:
     st.session_state.step = 0  # Start at landing page
@@ -92,10 +110,19 @@ if "scoring_queue" not in st.session_state:
     st.session_state.scoring_queue = None
 if "is_processing" not in st.session_state:
     st.session_state.is_processing = False
+if "session_id" not in st.session_state:
+    st.session_state.session_id = None
 
 
 def main():
     """Main application entry point."""
+    # Resolve session ID from URL (or generate one)
+    session_id = _get_or_create_session_id()
+    if st.session_state.session_id != session_id:
+        st.session_state.session_id = session_id
+    # Persist session ID in the URL query string
+    st.query_params["session"] = session_id
+
     render_sidebar()
 
     # Render current step

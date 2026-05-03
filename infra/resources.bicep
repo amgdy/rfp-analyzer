@@ -288,6 +288,10 @@ module rfpAnalyzer 'br/public:avm/res/app/container-app:0.22.0' = {
             name: 'STREAMLIT_SERVER_MAX_MESSAGE_SIZE'
             value: '500'
           }
+          {
+            name: 'AZURE_STORAGE_ACCOUNT_URL'
+            value: storageAccount.outputs.primaryBlobEndpoint
+          }
         ]
       }
     ]
@@ -404,9 +408,61 @@ module deployerRoleCognitiveServicesOpenAIUserRG 'br/public:avm/res/authorizatio
   }
 }
 
+// Storage account for session-based document storage
+module storageAccount 'br/public:avm/res/storage/storage-account:0.19.0' = {
+  name: 'storageAccount'
+  params: {
+    name: '${abbrs.storageStorageAccounts}${workload}${resourceToken}'
+    location: location
+    tags: tags
+    kind: 'StorageV2'
+    skuName: 'Standard_LRS'
+    allowBlobPublicAccess: false
+    publicNetworkAccess: 'Enabled'
+    networkAcls: {
+      defaultAction: 'Allow'
+      bypass: 'AzureServices'
+    }
+    blobServices: {
+      containers: [
+        {
+          name: 'rfp-sessions'
+          publicAccess: 'None'
+        }
+      ]
+    }
+    roleAssignments: [
+      {
+        // Storage Blob Data Contributor
+        principalId: rfpAnalyzerIdentity.outputs.principalId
+        principalType: 'ServicePrincipal'
+        roleDefinitionIdOrName: subscriptionResourceId(
+          'Microsoft.Authorization/roleDefinitions',
+          'ba92f5b4-2d11-453d-a403-e96b0029c9fe'
+        )
+      }
+    ]
+  }
+}
+
+// Storage Blob Data Contributor for deployer (local dev)
+module deployerRoleStorageBlobDataContributorRG 'br/public:avm/res/authorization/role-assignment/rg-scope:0.1.1' = if (!empty(principalId)) {
+  name: 'deployer-role-storage-blob-contributor'
+  params: {
+    principalId: principalId
+    roleDefinitionIdOrName: subscriptionResourceId(
+      'Microsoft.Authorization/roleDefinitions',
+      'ba92f5b4-2d11-453d-a403-e96b0029c9fe'
+    )
+    principalType: 'User'
+    description: 'Role assignment for deployer – Storage Blob Data Contributor in Resource Group scope'
+  }
+}
+
 output AZURE_CONTAINER_REGISTRY_ENDPOINT string = containerRegistry.outputs.loginServer
 output AZURE_RESOURCE_RFP_ANALYZER_ID string = rfpAnalyzer.outputs.resourceId
 output AZURE_OPENAI_ENDPOINT string = azureOpenAiEndpoint
 output AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT string = documentIntelligenceEndpoint
 output AZURE_CONTENT_UNDERSTANDING_ENDPOINT string = contentUnderstandingEndpoint
 output SERVICE_RFP_ANALYZER_URL string = 'https://${rfpAnalyzer.outputs.fqdn}'
+output AZURE_STORAGE_ACCOUNT_URL string = storageAccount.outputs.primaryBlobEndpoint

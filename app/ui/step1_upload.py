@@ -2,6 +2,7 @@
 
 import streamlit as st
 
+from services.blob_storage_client import get_blob_storage_client
 from services.logging_config import get_logger
 from ui.components import render_step_indicator
 
@@ -11,12 +12,35 @@ logger = get_logger(__name__)
 _MAX_FILE_SIZE_BYTES = 500 * 1024 * 1024
 
 
+def _upload_to_blob(session_id: str, rfp_file=None, proposal_files=None):
+    """Upload files to Azure Blob Storage under the session folder."""
+    try:
+        client = get_blob_storage_client()
+
+        if rfp_file is not None:
+            client.upload_rfp(session_id, rfp_file.name, rfp_file.getvalue())
+            logger.info("RFP uploaded to blob storage: %s", rfp_file.name)
+
+        if proposal_files:
+            for f in proposal_files:
+                client.upload_proposal(session_id, f.name, f.getvalue())
+            logger.info("Uploaded %d proposals to blob storage", len(proposal_files))
+    except Exception as e:
+        logger.error("Failed to upload files to blob storage: %s", str(e))
+        st.error(f"⚠️ Failed to upload files to storage: {e}")
+        raise
+
+
 def render_step1():
     """Step 1: Upload RFP and Vendor Proposals."""
     render_step_indicator(current_step=1)
 
     st.header("Step 1: Upload Documents")
     st.markdown("Upload the RFP document and vendor proposal files to begin the analysis.")
+
+    # Show session ID
+    session_id = st.session_state.session_id
+    st.caption(f"📋 Session: `{session_id}`")
 
     col1, col2 = st.columns(2)
 
@@ -38,9 +62,11 @@ def render_step1():
                 st.info(f"📎 **{rfp_file.name}** ({rfp_file.size / 1024:.1f} KB)")
                 if st.session_state.rfp_file is None or st.session_state.rfp_file.get('name') != rfp_file.name:
                     logger.info("RFP file uploaded: %s (%.1f KB)", rfp_file.name, rfp_file.size / 1024)
+                    # Upload to blob storage
+                    _upload_to_blob(session_id, rfp_file=rfp_file)
                 st.session_state.rfp_file = {
-                    "bytes": rfp_file.getvalue(),
-                    "name": rfp_file.name
+                    "name": rfp_file.name,
+                    "size": rfp_file.size,
                 }
 
         if st.session_state.rfp_file:
@@ -70,16 +96,18 @@ def render_step1():
                 for f in valid_files:
                     st.caption(f"• {f.name} ({f.size / 1024:.1f} KB)")
 
-                # Log new uploads
+                # Log and upload new files
                 current_names = {p.get('name') for p in st.session_state.proposal_files} if st.session_state.proposal_files else set()
                 new_names = {f.name for f in valid_files}
                 if current_names != new_names:
                     logger.info("Proposal files uploaded: %d files - %s",
                                len(valid_files),
                                ", ".join(f.name for f in valid_files))
+                    # Upload to blob storage
+                    _upload_to_blob(session_id, proposal_files=valid_files)
 
                 st.session_state.proposal_files = [
-                    {"bytes": f.getvalue(), "name": f.name}
+                    {"name": f.name, "size": f.size}
                     for f in valid_files
                 ]
 
