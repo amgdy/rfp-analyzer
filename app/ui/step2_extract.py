@@ -46,7 +46,14 @@ def _load_extracted_content_from_blob():
 
     This handles the case where session state is lost (e.g., page reload) but
     the extracted content is still available in blob storage.
+    Skips restore if the user intentionally cleared content (e.g., switched
+    extraction service).
     """
+    # Skip if the user intentionally cleared content (e.g., switched service)
+    if getattr(st.session_state, "_skip_blob_restore", False):
+        st.session_state._skip_blob_restore = False
+        return
+
     session_id = st.session_state.session_id
     if not session_id:
         return

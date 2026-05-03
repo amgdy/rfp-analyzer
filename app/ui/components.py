@@ -117,6 +117,9 @@ def render_sidebar():
                     st.session_state.extraction_service = service
                     st.session_state.rfp_content = None
                     st.session_state.proposal_contents = {}
+                    st.session_state.extraction_queue = None
+                    # Prevent blob restore from undoing the switch
+                    st.session_state._skip_blob_restore = True
                     st.rerun()
 
             with st.expander("🧠 Analysis Depth", expanded=True):
