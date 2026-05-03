@@ -1148,6 +1148,7 @@ def _render_shareable_download_links(session_id: str):
                     "📑 Download Full Analysis Report",
                     url,
                     use_container_width=True,
+                    key="share_full_analysis",
                 )
 
         # CSV comparison
@@ -1160,6 +1161,7 @@ def _render_shareable_download_links(session_id: str):
                     "📊 Download CSV Comparison",
                     url,
                     use_container_width=True,
+                    key="share_csv_comparison",
                 )
 
         # JSON data
@@ -1172,6 +1174,7 @@ def _render_shareable_download_links(session_id: str):
                     "📋 Download Evaluation Data (JSON)",
                     url,
                     use_container_width=True,
+                    key="share_json_data",
                 )
 
         # Vendor reports
@@ -1189,6 +1192,7 @@ def _render_shareable_download_links(session_id: str):
                             f"📄 {vendor_name[:20]}",
                             url,
                             use_container_width=True,
+                            key=f"share_vendor_{i}",
                         )
 
         if has_links:
