@@ -1084,7 +1084,7 @@ def render_export_options(comparison: dict, evaluations: list):
                 grade = eval_result.get("grade", "N/A")
                 medal = "🥇" if i == 0 else "🥈" if i == 1 else "🥉" if i == 2 else "📄"
 
-                vendor_key = f"vendor_report_{vendor_name}"
+                vendor_key = f"vendor_report_{safe_name}"  # stored with underscores
                 _render_export_link(
                     urls=urls,
                     report_key=vendor_key,
