@@ -5,13 +5,14 @@ import asyncio
 import time
 import uuid
 import json
+from typing import Optional
 
 from services.utils import format_duration
 from services.comparison_agent import ComparisonAgent, generate_word_report, generate_full_analysis_report
 from services.processing_queue import ProcessingQueue, QueueItemStatus
 from services.logging_config import get_logger
 from services.telemetry import get_tracer
-from ui.styles import STEP_ANIMATION_CSS
+from ui.styles import STEP_ANIMATION_CSS, EXPORT_LINK_CSS
 from ui.components import render_step_indicator
 
 # Optional chart support
@@ -317,6 +318,25 @@ def run_evaluation_pipeline():
 
             logger.info("====== SCORING PIPELINE COMPLETED in %.2fs ======", total_duration)
 
+            # Persist evaluation state to blob
+            try:
+                from services.session_state_manager import get_session_manager
+                session_id = st.session_state.session_id
+                mgr = get_session_manager(session_id)
+                mgr.load()
+                mgr.save_evaluation(
+                    results=qualified_results,
+                    disqualified=disqualified_results,
+                    comparison=st.session_state.comparison_results,
+                    duration_seconds=total_duration,
+                )
+                mgr.save_step_durations(st.session_state.step_durations)
+            except Exception as state_err:
+                logger.debug("Failed to save evaluation state: %s", str(state_err))
+
+            # Generate and store reports to blob storage
+            _store_reports_to_blob(qualified_results, st.session_state.comparison_results)
+
             # Final render
             render_status()
 
@@ -335,6 +355,69 @@ def run_evaluation_pipeline():
             st.session_state.is_processing = False
             render_status()
             st.error("❌ Error during evaluation. Please check the logs and try again.")
+
+
+def _store_reports_to_blob(evaluations: list, comparison: Optional[dict] = None):
+    """Generate reports and store them in blob storage for permanent download links."""
+    try:
+        from services.blob_storage_client import get_blob_storage_client
+        from services.session_state_manager import get_session_manager
+
+        session_id = st.session_state.session_id
+        if not session_id:
+            return
+
+        client = get_blob_storage_client()
+        mgr = get_session_manager(session_id)
+        mgr.load()
+
+        # Store full analysis report (Word)
+        if comparison and evaluations:
+            full_report = generate_full_analysis_report(comparison, evaluations)
+            if full_report:
+                blob_path = client.upload_report(
+                    session_id, "rfp_full_analysis_report.docx", full_report,
+                    content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                )
+                mgr.save_report("full_analysis", blob_path, "rfp_full_analysis_report.docx")
+
+        # Store CSV comparison
+        if comparison and evaluations:
+            comparison_agent = ComparisonAgent()
+            csv_content = comparison_agent.generate_csv_report(comparison, evaluations)
+            if csv_content:
+                blob_path = client.upload_report(
+                    session_id, "vendor_comparison.csv",
+                    csv_content.encode("utf-8") if isinstance(csv_content, str) else csv_content,
+                    content_type="text/csv",
+                )
+                mgr.save_report("csv_comparison", blob_path, "vendor_comparison.csv")
+
+        # Store JSON data
+        full_data = {"comparison": comparison, "evaluations": evaluations}
+        json_bytes = json.dumps(full_data, indent=2, default=str).encode("utf-8")
+        blob_path = client.upload_report(
+            session_id, "evaluation_data.json", json_bytes,
+            content_type="application/json",
+        )
+        mgr.save_report("json_data", blob_path, "evaluation_data.json")
+
+        # Store individual vendor reports
+        for eval_result in evaluations:
+            vendor_name = eval_result.get("supplier_name", "Unknown").replace(" ", "_")
+            word_doc = generate_word_report(eval_result)
+            if word_doc:
+                filename = f"report_{vendor_name}.docx"
+                blob_path = client.upload_report(
+                    session_id, filename, word_doc,
+                    content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                )
+                mgr.save_report("vendor_report", blob_path, filename, vendor_name=vendor_name)
+
+        logger.info("Stored all reports to blob storage for session %s", session_id)
+
+    except Exception as e:
+        logger.error("Failed to store reports to blob: %s", str(e))
 
 
 # ---------------------------------------------------------------------------
@@ -907,80 +990,216 @@ def render_detailed_scores(evaluations: list):
 
 
 def render_export_options(comparison: dict, evaluations: list):
-    """Render export options for reports."""
+    """Render export options as copyable links for better UX.
+
+    Uses cloud SAS URLs so users can right-click → copy link, share with
+    stakeholders, or open directly in their browser.  Falls back to
+    st.download_button when blob storage URLs are not available.
+    """
     st.subheader("📥 Export Reports")
+    st.markdown(
+        "Right-click any link below to copy it, or click to download directly. "
+        "Links are valid for 60 minutes — refresh the page to regenerate."
+    )
 
-    # Full Analysis Report (with comparison)
-    st.markdown("### 📑 Full Analysis Report")
-    st.markdown("Complete report including comparison, rankings, and all vendor details.")
+    # Inject link card CSS
+    st.markdown(EXPORT_LINK_CSS, unsafe_allow_html=True)
 
-    if comparison and evaluations:
-        full_report = generate_full_analysis_report(comparison, evaluations)
-        if full_report:
-            st.download_button(
-                label="📑 Download Full Analysis Report (Word)",
-                data=full_report,
-                file_name="rfp_full_analysis_report.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                use_container_width=True,
-                key="full_analysis_report"
-            )
-        else:
-            st.caption("Word export not available. Install python-docx with: pip install python-docx")
+    # Try to get cloud URLs from session state
+    session_id = st.session_state.get("session_id")
+    urls: dict = {}  # report_key -> (url, filename)
+    if session_id:
+        urls = _get_report_urls(session_id)
 
-    st.markdown("---")
+    # ── Primary Reports ──────────────────────────────────────────────────
+    st.markdown("#### 📑 Primary Reports")
 
     col1, col2, col3 = st.columns(3)
 
     with col1:
-        st.markdown("### 📊 CSV Comparison")
-        if comparison and evaluations:
-            comparison_agent = ComparisonAgent()
-            csv_content = comparison_agent.generate_csv_report(comparison, evaluations)
-            st.download_button(
-                label="📊 Download CSV",
-                data=csv_content,
-                file_name="vendor_comparison.csv",
-                mime="text/csv",
-                use_container_width=True
-            )
+        _render_export_link(
+            urls=urls,
+            report_key="full_analysis",
+            icon="📑",
+            title="Full Analysis Report",
+            description="Word Document • Comprehensive report with comparison, rankings, and vendor details",
+            # fallback data generation
+            fallback_data_fn=lambda: generate_full_analysis_report(comparison, evaluations) if comparison and evaluations else None,
+            fallback_filename="rfp_full_analysis_report.docx",
+            fallback_mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            fallback_key="full_analysis_report",
+        )
 
     with col2:
-        st.markdown("### 📋 JSON Data")
-        full_data = {
-            "comparison": comparison,
-            "evaluations": evaluations
-        }
-        st.download_button(
-            label="📋 Download JSON",
-            data=json.dumps(full_data, indent=2),
-            file_name="evaluation_data.json",
-            mime="application/json",
-            use_container_width=True
+        def _csv_data():
+            if comparison and evaluations:
+                agent = ComparisonAgent()
+                return agent.generate_csv_report(comparison, evaluations)
+            return None
+
+        _render_export_link(
+            urls=urls,
+            report_key="csv_comparison",
+            icon="📊",
+            title="CSV Comparison",
+            description="Spreadsheet • Score matrix suitable for Excel or data analysis tools",
+            fallback_data_fn=_csv_data,
+            fallback_filename="vendor_comparison.csv",
+            fallback_mime="text/csv",
+            fallback_key="csv_export",
         )
 
     with col3:
-        st.markdown("### 📄 Individual Reports")
-        st.caption("Detailed Word report for each vendor")
+        def _json_data():
+            return json.dumps({"comparison": comparison, "evaluations": evaluations}, indent=2, default=str)
 
-    # Individual vendor reports in a separate section
-    st.markdown("### 📄 Individual Vendor Reports (Word)")
-    st.markdown("Detailed reports with criterion justifications for each vendor.")
+        _render_export_link(
+            urls=urls,
+            report_key="json_data",
+            icon="📋",
+            title="Evaluation Data (JSON)",
+            description="Machine-readable • Full evaluation data for integrations or archival",
+            fallback_data_fn=_json_data,
+            fallback_filename="evaluation_data.json",
+            fallback_mime="application/json",
+            fallback_key="json_export",
+        )
 
-    vendor_cols = st.columns(min(len(evaluations), 4))
-    for i, eval_result in enumerate(evaluations):
-        col_idx = i % min(len(evaluations), 4)
-        with vendor_cols[col_idx]:
-            vendor_name = eval_result.get("supplier_name", f"Vendor_{i+1}").replace(" ", "_")
-            word_doc = generate_word_report(eval_result)
-            if word_doc:
-                st.download_button(
-                    label=f"📄 {vendor_name[:20]}",
-                    data=word_doc,
-                    file_name=f"report_{vendor_name}.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    use_container_width=True,
-                    key=f"word_{i}"
+    # ── Individual Vendor Reports ────────────────────────────────────────
+    if evaluations:
+        st.markdown("---")
+        st.markdown("#### 📄 Individual Vendor Reports")
+        st.caption("Detailed Word document per vendor with criterion justifications, strengths, and gaps.")
+
+        num_vendors = len(evaluations)
+        cols_per_row = min(num_vendors, 4)
+        vendor_cols = st.columns(cols_per_row)
+
+        for i, eval_result in enumerate(evaluations):
+            col_idx = i % cols_per_row
+            with vendor_cols[col_idx]:
+                vendor_name = eval_result.get("supplier_name", f"Vendor_{i+1}")
+                safe_name = vendor_name.replace(" ", "_")
+                total_score = eval_result.get("total_score", 0)
+                grade = eval_result.get("grade", "N/A")
+                medal = "🥇" if i == 0 else "🥈" if i == 1 else "🥉" if i == 2 else "📄"
+
+                vendor_key = f"vendor_report_{safe_name}"  # stored with underscores
+                _render_export_link(
+                    urls=urls,
+                    report_key=vendor_key,
+                    icon=medal,
+                    title=f"{vendor_name[:22]}",
+                    description=f"Score: {total_score:.1f} • Grade: {grade}",
+                    fallback_data_fn=lambda er=eval_result: generate_word_report(er),
+                    fallback_filename=f"report_{safe_name}.docx",
+                    fallback_mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    fallback_key=f"word_{i}",
                 )
+
+    # Session share tip
+    if session_id:
+        st.markdown("---")
+        st.info(
+            f"💡 **Share this session:** Send the URL `?session={session_id}&download=full_analysis` "
+            "to stakeholders for on-demand report access."
+        )
+
+
+def _get_report_urls(session_id: str) -> dict:
+    """Fetch SAS download URLs for all stored reports.
+
+    Returns a dict mapping report_key -> (url, filename).
+    """
+    result: dict = {}
+    try:
+        from services.blob_storage_client import get_blob_storage_client
+        from services.session_state_manager import get_session_manager
+
+        mgr = get_session_manager(session_id)
+        state = mgr.load()
+        reports = state.get("reports", {})
+        client = get_blob_storage_client()
+
+        def _url(entry: dict) -> Optional[str]:
+            url = entry.get("download_url")
+            if url:
+                return url
+            blob_path = entry.get("blob_path")
+            if blob_path:
+                return client.generate_download_url(
+                    blob_path, expiry_minutes=60, filename=entry.get("filename")
+                )
+            return None
+
+        for key in ("full_analysis", "csv_comparison", "json_data"):
+            entry = reports.get(key)
+            if entry:
+                url = _url(entry)
+                if url:
+                    result[key] = (url, entry.get("filename", "report"))
+
+        for vr in reports.get("vendor_reports", []):
+            vendor_name = vr.get("vendor_name", "Unknown")
+            url = _url(vr)
+            if url:
+                result[f"vendor_report_{vendor_name}"] = (url, vr.get("filename", f"report_{vendor_name}.docx"))
+
+    except Exception as e:
+        logger.debug("Could not fetch report URLs: %s", str(e))
+
+    return result
+
+
+def _render_export_link(
+    urls: dict,
+    report_key: str,
+    icon: str,
+    title: str,
+    description: str,
+    fallback_data_fn=None,
+    fallback_filename: str = "report",
+    fallback_mime: str = "application/octet-stream",
+    fallback_key: str = "export",
+):
+    """Render a single export item — as a styled link if a URL exists, else a download button."""
+    url_info = urls.get(report_key)
+
+    with st.container(border=True):
+        if url_info:
+            url, filename = url_info
+            st.markdown(
+                f'<div class="export-link-card">'
+                f'  <a href="{url}" target="_blank" rel="noopener">{icon} {title}</a>'
+                f'  <div class="link-desc">{description}</div>'
+                f'  <div class="link-meta">📎 {filename}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            # No cloud URL available — fall back to Streamlit download button
+            st.markdown(f"**{icon} {title}**")
+            st.caption(description)
+            if fallback_data_fn:
+                data = fallback_data_fn()
+                if data:
+                    if isinstance(data, str):
+                        size_kb = len(data.encode("utf-8")) / 1024
+                    elif isinstance(data, (bytes, bytearray)):
+                        size_kb = len(data) / 1024
+                    else:
+                        size_kb = 0
+                    if size_kb > 0:
+                        st.caption(f"📦 {size_kb:.0f} KB")
+                    st.download_button(
+                        label=f"⬇️ Download {fallback_filename}",
+                        data=data,
+                        file_name=fallback_filename,
+                        mime=fallback_mime,
+                        use_container_width=True,
+                        key=fallback_key,
+                    )
+                else:
+                    st.caption("Not available")
             else:
-                st.caption(f"Not available for {vendor_name[:15]}")
+                st.caption("Not available")

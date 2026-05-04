@@ -8,6 +8,8 @@ A comprehensive workflow for analyzing RFPs and scoring vendor proposals:
 4. AI-powered proposal scoring and multi-vendor comparison
 """
 
+import uuid
+
 import streamlit as st
 from pathlib import Path
 
@@ -22,6 +24,7 @@ from services.telemetry import setup_telemetry, _get_app_version
 setup_telemetry()
 
 from services.document_processor import ExtractionService
+from services.blob_storage_client import is_valid_session_id
 
 # Import UI modules
 from ui.landing import render_landing_page
@@ -29,7 +32,8 @@ from ui.step1_upload import render_step1
 from ui.step2_extract import render_step2
 from ui.step3_criteria import render_step3
 from ui.step4_score import render_step4
-from ui.components import render_sidebar
+from ui.download import render_download_page
+from ui.components import render_sidebar, render_session_header, render_loading_overlay
 
 # Get logger (logging is already configured at import time)
 logger = get_logger(__name__)
@@ -56,6 +60,27 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+
+# Session IDs must be valid UUIDs or 8-32 alphanumeric characters (safe for blob paths)
+def _get_or_create_session_id() -> str:
+    """Get session ID from URL query params, or generate a new one.
+
+    The session ID is persisted exclusively in the URL query string
+    so that it survives page reloads and is never stored in memory alone.
+    Uses full UUIDs (e.g. '550e8400-e29b-41d4-a716-446655440000') for
+    bullet-proof uniqueness. Legacy alphanumeric IDs (8-32 chars) are
+    also accepted for backwards compatibility.
+    """
+    params = st.query_params
+    session_id = params.get("session")
+    if session_id and is_valid_session_id(session_id):
+        return session_id
+    # Generate a new session ID (full UUID) and persist it in the URL immediately
+    new_id = str(uuid.uuid4())
+    st.query_params["session"] = new_id
+    return new_id
+
 
 # Initialize session state
 if "step" not in st.session_state:
@@ -92,11 +117,32 @@ if "scoring_queue" not in st.session_state:
     st.session_state.scoring_queue = None
 if "is_processing" not in st.session_state:
     st.session_state.is_processing = False
+if "session_id" not in st.session_state:
+    st.session_state.session_id = None
 
 
 def main():
     """Main application entry point."""
+    # Resolve session ID from URL (or generate one)
+    session_id = _get_or_create_session_id()
+    if st.session_state.session_id != session_id:
+        st.session_state.session_id = session_id
+    # Persist session ID in the URL query string
+    st.query_params["session"] = session_id
+
+    # Check if this is a download request
+    if st.query_params.get("download"):
+        render_download_page()
+        return
+
+    # Restore session from blob state if needed (handles page reloads)
+    _restore_session_from_blob(session_id)
+
     render_sidebar()
+
+    # Session ID header and loading overlay (visible on all pages)
+    render_session_header()
+    render_loading_overlay()
 
     # Render current step
     if st.session_state.step == 0:
@@ -109,6 +155,79 @@ def main():
         render_step3()
     elif st.session_state.step == 4:
         render_step4()
+
+
+def _restore_session_from_blob(session_id: str):
+    """Restore Streamlit session state from blob-persisted state.json.
+
+    Only restores if session state appears empty (step == 0 and no uploads),
+    which indicates a fresh page load for an existing session.
+    """
+    # Only attempt restore if we're at the default state
+    if st.session_state.step != 0:
+        return
+    if st.session_state.rfp_file is not None:
+        return
+
+    try:
+        from services.session_state_manager import get_session_manager
+        mgr = get_session_manager(session_id)
+        state = mgr.load()
+
+        # If blob state has progress, restore it
+        saved_step = state.get("current_step", 0)
+        if saved_step == 0:
+            return
+
+        logger.info("Restoring session %s from step %d", session_id, saved_step)
+
+        # Restore step
+        st.session_state.step = saved_step
+
+        # Restore config
+        config = state.get("config", {})
+        if config.get("extraction_service"):
+            try:
+                st.session_state.extraction_service = ExtractionService(config["extraction_service"])
+            except ValueError:
+                logger.warning("Unknown extraction service in saved state: %s", config["extraction_service"])
+        if config.get("reasoning_effort"):
+            st.session_state.reasoning_effort = config["reasoning_effort"]
+        if config.get("global_criteria"):
+            st.session_state.global_criteria = config["global_criteria"]
+
+        # Restore upload metadata
+        uploads = state.get("uploads", {})
+        if uploads.get("rfp"):
+            st.session_state.rfp_file = {
+                "name": uploads["rfp"]["name"],
+                "size": uploads["rfp"].get("size", 0),
+            }
+        if uploads.get("proposals"):
+            st.session_state.proposal_files = [
+                {"name": p["name"], "size": p.get("size", 0)}
+                for p in uploads["proposals"]
+            ]
+
+        # Restore criteria
+        criteria = state.get("criteria", {})
+        if criteria.get("completed") and criteria.get("criteria_data"):
+            st.session_state.extracted_criteria = criteria["criteria_data"]
+
+        # Restore evaluation results
+        evaluation = state.get("evaluation", {})
+        if evaluation.get("completed"):
+            st.session_state.evaluation_results = evaluation.get("results", [])
+            st.session_state.disqualified_results = evaluation.get("disqualified", [])
+            st.session_state.comparison_results = evaluation.get("comparison")
+
+        # Restore step durations
+        st.session_state.step_durations = state.get("step_durations", {})
+
+        logger.info("Session %s restored successfully (step %d)", session_id, saved_step)
+
+    except Exception as e:
+        logger.warning("Could not restore session from blob: %s", str(e))
 
 
 if __name__ == "__main__":

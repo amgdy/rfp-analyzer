@@ -7,6 +7,7 @@ This document provides a comprehensive overview of the RFP Analyzer application 
 - [System Overview](#system-overview)
 - [Application Architecture](#application-architecture)
 - [Component Architecture](#component-architecture)
+- [Session State & Persistence](#session-state--persistence)
 - [Multi-Agent System](#multi-agent-system)
 - [Azure Infrastructure](#azure-infrastructure)
 - [Data Flow](#data-flow)
@@ -93,16 +94,17 @@ The main entry point providing an interactive web interface:
 ```mermaid
 flowchart TB
     subgraph StreamlitApp["Streamlit Application"]
-        subgraph SSM["Session State Manager"]
-            DS["Document Storage"]
-            ER["Extraction Results"]
+        subgraph SSM["Session & Storage"]
+            SID["Session ID (URL query param)"]
+            BS["Azure Blob Storage<br>• Uploaded files<br>• Extracted text"]
+            ER["Extraction Results (cache)"]
             EVR["Evaluation Results"]
             UIS["UI State"]
         end
         
         subgraph Steps["Workflow Steps"]
-            S1["Step 1: Upload<br>• RFP file<br>• Proposals<br>• Preview"]
-            S2["Step 2: Extract<br>• Service selection<br>• Progress<br>• Results"]
+            S1["Step 1: Upload<br>• RFP file → Blob<br>• Proposals → Blob<br>• Preview"]
+            S2["Step 2: Extract<br>• Service selection<br>• Progress<br>• Results → Blob"]
             S3["Step 3: Criteria<br>• AI-extracted criteria<br>• Weights review<br>• User confirmation"]
             S4["Step 4: Score<br>• Proposal scoring<br>• Vendor comparison<br>• Export options"]
         end
@@ -210,6 +212,81 @@ flowchart TB
     
     style CompAgent fill:#e8eaf6,stroke:#283593
 ```
+
+---
+
+## Session State & Persistence
+
+The application persists all workflow state to Azure Blob Storage as a JSON state file, enabling:
+
+1. **Resume from any step** — If the browser is closed or session state is lost, reopening the same URL (`?session=<id>`) restores the workflow at the last completed step.
+2. **Permanent report links** — Generated reports (Word, CSV, JSON) are stored in blob storage with permanent blob paths. Time-limited SAS URLs are generated on-demand for secure downloads.
+3. **Session audit trail** — The state file records timestamps, durations, and configuration for each pipeline stage.
+
+### Storage Structure
+
+```
+<container: rfp-sessions>/
+  <session_id>/
+    state.json                          ← Session state (JSON)
+    uploads/
+      rfp/<filename>                    ← Original uploaded RFP
+      proposals/<filename>              ← Original uploaded proposals
+    extracted/
+      rfp/<filename>.md                 ← Extracted RFP text
+      proposals/<filename>.md           ← Extracted proposal text
+    reports/
+      rfp_full_analysis_report.docx     ← Full analysis Word doc
+      vendor_comparison.csv             ← CSV comparison
+      evaluation_data.json              ← Full JSON data export
+      report_<vendor_name>.docx         ← Per-vendor Word reports
+```
+
+### State File Schema (`state.json`)
+
+```json
+{
+  "version": "1.0",
+  "session_id": "abc123def456",
+  "created_at": "2024-01-15T10:30:00+00:00",
+  "updated_at": "2024-01-15T11:45:00+00:00",
+  "current_step": 4,
+  "config": {
+    "extraction_service": "document_intelligence",
+    "reasoning_effort": "high",
+    "global_criteria": ""
+  },
+  "uploads": {
+    "rfp": {"name": "rfp.pdf", "size": 52000, "blob_path": "..."},
+    "proposals": [{"name": "vendor_a.pdf", "size": 31000, "blob_path": "..."}]
+  },
+  "extraction": {"completed": true, "duration_seconds": 15.2},
+  "criteria": {"completed": true, "criteria_count": 8, "criteria_data": {...}},
+  "evaluation": {"completed": true, "results": [...], "comparison": {...}},
+  "reports": {
+    "full_analysis": {"blob_path": "...", "filename": "...", "generated_at": "..."},
+    "csv_comparison": {"blob_path": "...", "filename": "...", "generated_at": "..."},
+    "json_data": {"blob_path": "...", "filename": "...", "generated_at": "..."},
+    "vendor_reports": [{"vendor_name": "...", "blob_path": "...", "filename": "..."}]
+  },
+  "step_durations": {"extraction_total": 15.2, "criteria_extraction": 8.1}
+}
+```
+
+### Download Handler
+
+Reports can be accessed via permanent URLs:
+
+```
+/?session=<session_id>&download=full_analysis
+/?session=<session_id>&download=csv_comparison
+/?session=<session_id>&download=json_data
+/?session=<session_id>&download=vendor_report_<vendor_name>
+```
+
+Each access generates a fresh time-limited SAS token (60-minute expiry) using either:
+- **User Delegation Key** (Managed Identity in production)
+- **Account Key** (connection string in local dev)
 
 ---
 
@@ -330,13 +407,21 @@ flowchart TB
                 ACR --> CA
             end
             
-            MI["🔐 User-Assigned Managed Identity<br>• Azure AI Developer<br>• Cognitive Services User<br>• AcrPull"]
+            subgraph Storage["💾 Azure Storage"]
+                SA["Storage Account<br>• Standard_LRS<br>• StorageV2"]
+                BC["Blob Container:<br>rfp-sessions<br>• Uploaded docs<br>• Extracted text"]
+                SA --> BC
+            end
+            
+            MI["🔐 User-Assigned Managed Identity<br>• Azure AI Developer<br>• Cognitive Services User<br>• Storage Blob Data Contributor<br>• AcrPull"]
         end
     end
     
     MI -.-> AIFoundry
     MI -.-> ACR
+    MI -.-> SA
     CA -.-> AIFoundry
+    CA -.-> SA
     
     style Subscription fill:#e3f2fd,stroke:#1565c0
     style AIFoundry fill:#fff3e0,stroke:#ef6c00
@@ -471,9 +556,9 @@ flowchart TB
     CU & DI & TextRead --> Output
     
     subgraph Output["📄 Extracted Markdown"]
-        O1["Stored in session:"]
-        O2["• RFP content"]
-        O3["• Proposal contents[]"]
+        O1["Stored in Azure Blob Storage:"]
+        O2["• RFP content → &lt;session_id&gt;/extracted/rfp/"]
+        O3["• Proposal contents → &lt;session_id&gt;/extracted/proposals/"]
     end
     
     style DocProc fill:#e3f2fd,stroke:#1565c0
@@ -486,8 +571,8 @@ flowchart TB
 
 ```mermaid
 flowchart TB
-    subgraph Session["Session State"]
-        RFP["RFP Markdown"]
+    subgraph Session["Azure Blob Storage (Session)"]
+        RFP["RFP Markdown<br>&lt;session_id&gt;/extracted/rfp/"]
         P1["Proposal 1 Markdown"]
         PN["Proposal N Markdown"]
     end
@@ -1034,13 +1119,15 @@ sequenceDiagram
     participant AOAI as Azure OpenAI
     
     User->>UI: Upload RFP & Proposals
-    UI->>UI: Store in session state
+    UI->>UI: Generate session ID (in URL)
+    UI->>UI: Upload files to Azure Blob Storage
     
     User->>UI: Click "Extract"
+    UI->>UI: Download files from Blob
     UI->>DP: Process documents
     DP->>CU: Extract content
     CU-->>DP: Markdown content
-    DP-->>UI: Store extracted content
+    DP-->>UI: Store extracted content in Blob
     
     User->>UI: Click "Extract Criteria"
     UI->>CEA: Extract criteria from RFP
