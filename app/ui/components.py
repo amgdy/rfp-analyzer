@@ -210,6 +210,20 @@ def render_sidebar():
             )
 
         st.divider()
+
+        # Show session ID on all pages
+        session_id = st.session_state.get("session_id", "")
+        if session_id:
+            st.markdown(
+                f'<div style="font-size:0.75rem;color:#6B7280;word-break:break-all;">'
+                f"🔗 Session: <code>{session_id}</code></div>",
+                unsafe_allow_html=True,
+            )
+
+        # Show processing indicator when active
+        if st.session_state.is_processing:
+            st.warning("⏳ **Processing...** Please wait while the operation completes. Do not close or refresh this page.")
+
         st.caption("Powered by Azure AI Services, Microsoft Foundry & Agent Framework")
         # Show app version
         try:
