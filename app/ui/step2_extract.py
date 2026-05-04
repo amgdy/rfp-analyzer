@@ -463,7 +463,7 @@ def run_extraction_pipeline():
             failed_items = extraction_queue.get_failed_items()
             if failed_items:
                 # Get the first failure reason for display
-                first_reason = failed_items[0].error or str(e)
+                first_reason = failed_items[0].error_message or str(e)
                 st.error(f"❌ **Extraction failed**\n\n{first_reason}")
             else:
                 st.error(f"❌ Error during extraction: {e}")
