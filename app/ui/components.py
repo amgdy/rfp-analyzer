@@ -11,8 +11,41 @@ from services.report_generator import (
 )
 from services.document_processor import ExtractionService
 from services.logging_config import get_logger
+from ui.styles import SESSION_HEADER_CSS, LOADING_OVERLAY_CSS
 
 logger = get_logger(__name__)
+
+
+def render_session_header():
+    """Render the session ID in a top bar visible on all pages."""
+    session_id = st.session_state.get("session_id", "")
+    if session_id:
+        st.markdown(SESSION_HEADER_CSS, unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="session-header">'
+            f"🔗 Session: <code>{session_id}</code></div>",
+            unsafe_allow_html=True,
+        )
+
+
+def render_loading_overlay():
+    """Render a full-page grayed-out overlay when processing is active.
+
+    This prevents user interaction and makes it clear the app is busy.
+    """
+    if st.session_state.get("is_processing", False):
+        st.markdown(LOADING_OVERLAY_CSS, unsafe_allow_html=True)
+        st.markdown(
+            '<div class="loading-overlay">'
+            '  <div class="loading-box">'
+            '    <div class="loading-spinner"></div>'
+            "    <h3>Processing...</h3>"
+            "    <p>Please wait while the operation completes.<br>"
+            "    Do not close or refresh this page.</p>"
+            "  </div>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
 
 
 def render_step_indicator(current_step: int):
@@ -210,19 +243,6 @@ def render_sidebar():
             )
 
         st.divider()
-
-        # Show session ID on all pages
-        session_id = st.session_state.get("session_id", "")
-        if session_id:
-            st.markdown(
-                f'<div style="font-size:0.75rem;color:#6B7280;word-break:break-all;">'
-                f"🔗 Session: <code>{session_id}</code></div>",
-                unsafe_allow_html=True,
-            )
-
-        # Show processing indicator when active
-        if st.session_state.is_processing:
-            st.warning("⏳ **Processing...** Please wait while the operation completes. Do not close or refresh this page.")
 
         st.caption("Powered by Azure AI Services, Microsoft Foundry & Agent Framework")
         # Show app version

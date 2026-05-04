@@ -33,7 +33,7 @@ from ui.step2_extract import render_step2
 from ui.step3_criteria import render_step3
 from ui.step4_score import render_step4
 from ui.download import render_download_page
-from ui.components import render_sidebar
+from ui.components import render_sidebar, render_session_header, render_loading_overlay
 
 # Get logger (logging is already configured at import time)
 logger = get_logger(__name__)
@@ -139,6 +139,10 @@ def main():
     _restore_session_from_blob(session_id)
 
     render_sidebar()
+
+    # Session ID header and loading overlay (visible on all pages)
+    render_session_header()
+    render_loading_overlay()
 
     # Render current step
     if st.session_state.step == 0:
