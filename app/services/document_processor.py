@@ -268,9 +268,31 @@ class DocumentProcessor:
         # Use the prebuilt-documentSearch analyzer for document analysis
         # This extracts text, tables, and structure from documents as markdown
         api_call_start = time.time()
-        response = self.cu_client.begin_analyze_binary_bytes(
-            analyzer_id="prebuilt-documentSearch", file_bytes=file_bytes
-        )
+        try:
+            response = self.cu_client.begin_analyze_binary_bytes(
+                analyzer_id="prebuilt-documentSearch", file_bytes=file_bytes
+            )
+        except Exception as e:
+            error_msg = str(e)
+            # Handle the "DefaultsNotSet" error with a user-friendly message
+            if "DefaultsNotSet" in error_msg:
+                logger.error(
+                    "[REQ:%s] Content Understanding service defaults not configured: %s",
+                    request_id,
+                    error_msg,
+                )
+                raise ValueError(
+                    "Azure Content Understanding service is not fully configured. "
+                    "The service defaults have not been set up yet.\n\n"
+                    "To fix this, please ask your Azure administrator to:\n"
+                    "1. Open the Azure AI Foundry portal for this resource\n"
+                    "2. Navigate to Content Understanding settings\n"
+                    "3. Complete the initial setup to configure service defaults\n\n"
+                    "Alternatively, switch to 'Document Intelligence' in the sidebar "
+                    "extraction settings to use the other extraction service."
+                ) from e
+            # Re-raise other errors as-is
+            raise
         api_call_duration = time.time() - api_call_start
         logger.info(
             "[REQ:%s] API call initiated in %.3fs", request_id, api_call_duration

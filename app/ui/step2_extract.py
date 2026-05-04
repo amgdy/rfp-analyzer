@@ -458,4 +458,12 @@ def run_extraction_pipeline():
             extraction_queue.finish()
             st.session_state.extraction_queue = extraction_queue
             st.session_state.is_processing = False
-            st.error("❌ Error during extraction. Please check the logs and try again.")
+
+            # Show user-friendly error details from failed items
+            failed_items = extraction_queue.get_failed_items()
+            if failed_items:
+                # Get the first failure reason for display
+                first_reason = failed_items[0].error or str(e)
+                st.error(f"❌ **Extraction failed**\n\n{first_reason}")
+            else:
+                st.error(f"❌ Error during extraction: {e}")
