@@ -76,6 +76,46 @@ LOADING_OVERLAY_CSS = """
 </style>
 """
 
+# CSS for styled export download links
+EXPORT_LINK_CSS = """
+<style>
+.export-link-card {
+    border: 1px solid #E5E7EB;
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 8px;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+.export-link-card:hover {
+    border-color: #6366F1;
+    box-shadow: 0 2px 8px rgba(99,102,241,0.15);
+}
+.export-link-card a {
+    text-decoration: none;
+    color: #4F46E5;
+    font-weight: 600;
+    font-size: 0.95rem;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.export-link-card a:hover {
+    color: #4338CA;
+    text-decoration: underline;
+}
+.export-link-card .link-desc {
+    color: #6B7280;
+    font-size: 0.8rem;
+    margin-top: 4px;
+}
+.export-link-card .link-meta {
+    color: #9CA3AF;
+    font-size: 0.75rem;
+    margin-top: 2px;
+}
+</style>
+"""
+
 STEP_ANIMATION_CSS = """
 <style>
 @keyframes pulse {
