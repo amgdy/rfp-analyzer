@@ -9,7 +9,7 @@ from services.report_generator import (
     generate_score_report,
     generate_score_report_v2,
 )
-from services.document_processor import ExtractionService
+from services.document_processor import ExtractionService, OversizeStrategy
 from services.logging_config import get_logger
 from ui.styles import SESSION_HEADER_CSS, LOADING_OVERLAY_CSS
 
@@ -155,6 +155,32 @@ def render_sidebar():
                     st.session_state._skip_blob_restore = True
                     st.rerun()
 
+                # Show oversize strategy selector for Content Understanding
+                if st.session_state.extraction_service == ExtractionService.CONTENT_UNDERSTANDING:
+                    st.markdown("**Large document strategy** (>300 pages):")
+                    strategy_options = {
+                        OversizeStrategy.CHUNKING: "Split & Process (chunking)",
+                        OversizeStrategy.DI_FALLBACK: "Fallback to Document Intelligence",
+                    }
+                    strategy = st.radio(
+                        "Strategy for oversized PDFs:",
+                        options=list(strategy_options.keys()),
+                        index=0
+                        if st.session_state.oversize_strategy == OversizeStrategy.CHUNKING
+                        else 1,
+                        format_func=lambda x: strategy_options[x],
+                        help=(
+                            "Azure Content Understanding supports up to 300 pages per request. "
+                            "**Chunking** splits the PDF into parts and processes each separately. "
+                            "**DI Fallback** uses Document Intelligence (supports up to 2000 pages) instead."
+                        ),
+                        disabled=st.session_state.is_processing,
+                    )
+                    if strategy != st.session_state.oversize_strategy:
+                        logger.info("Oversize strategy changed to: %s", strategy.value)
+                        st.session_state.oversize_strategy = strategy
+                        st.rerun()
+
             with st.expander("🧠 Analysis Depth", expanded=True):
                 depth_options = {
                     "low": "Standard (~5 mins)",
@@ -221,6 +247,7 @@ def render_sidebar():
                 st.session_state.extraction_service = (
                     ExtractionService.DOCUMENT_INTELLIGENCE
                 )
+                st.session_state.oversize_strategy = OversizeStrategy.CHUNKING
                 st.session_state.evaluation_mode = "individual"
                 st.session_state.reasoning_effort = "low"
                 st.session_state.extraction_queue = None

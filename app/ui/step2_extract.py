@@ -6,7 +6,7 @@ import time
 import uuid
 
 from services.utils import format_duration, clean_extracted_text
-from services.document_processor import ExtractionService, requires_ai_extraction
+from services.document_processor import ExtractionService, OversizeStrategy, CU_MAX_PAGES, requires_ai_extraction
 from services.processing_queue import ProcessingQueue, QueueItemStatus
 from services.token_utils import estimate_token_count, MODEL_CONTEXT_WINDOW
 from services.logging_config import get_logger
@@ -111,12 +111,21 @@ def render_step2():
     st.markdown("---")
     st.subheader("⚙️ Current Configuration")
 
-    config_col1, config_col2 = st.columns(2)
+    config_col1, config_col2, config_col3 = st.columns(3)
     with config_col1:
         service_name = "Content Understanding" if st.session_state.extraction_service == ExtractionService.CONTENT_UNDERSTANDING else "Document Intelligence"
         st.metric("Extraction Service", service_name)
     with config_col2:
         st.metric("Analysis Depth", st.session_state.reasoning_effort.title())
+    with config_col3:
+        if st.session_state.extraction_service == ExtractionService.CONTENT_UNDERSTANDING:
+            strategy_label = (
+                "Chunking" if st.session_state.oversize_strategy == OversizeStrategy.CHUNKING
+                else "DI Fallback"
+            )
+            st.metric("Large Doc Strategy", strategy_label)
+        else:
+            st.metric("Max Pages", "2,000")
 
     # Global criteria preview
     if st.session_state.global_criteria:
@@ -325,18 +334,40 @@ def run_extraction_pipeline():
 
             total_files = len(all_file_data)
 
+            # Notify user about oversized PDFs when using Content Understanding
+            if extraction_service == ExtractionService.CONTENT_UNDERSTANDING:
+                from services.utils import get_pdf_page_count
+                oversize_strategy = st.session_state.oversize_strategy
+                for file_data in all_file_data:
+                    if file_data["name"].lower().endswith(".pdf"):
+                        pages = get_pdf_page_count(file_data["bytes"])
+                        if pages > CU_MAX_PAGES:
+                            strategy_label = (
+                                "splitting into chunks and processing each separately"
+                                if oversize_strategy == OversizeStrategy.CHUNKING
+                                else "using Document Intelligence as a fallback"
+                            )
+                            st.warning(
+                                f"⚠️ **\"{file_data['name']}\"** has **{pages} pages** "
+                                f"(Content Understanding limit: {CU_MAX_PAGES}). "
+                                f"We will handle this by {strategy_label}."
+                            )
+
             # Mark all items as processing
             for item in extraction_queue.items:
                 item.start()
 
             # Define async function for parallel processing
+            oversize_strategy = st.session_state.oversize_strategy
+
             async def process_all_documents():
                 tasks = []
                 for file_data in all_file_data:
                     task = process_document(
                         file_data["bytes"],
                         file_data["name"],
-                        extraction_service
+                        extraction_service,
+                        oversize_strategy,
                     )
                     tasks.append(task)
                 return await asyncio.gather(*tasks, return_exceptions=True)

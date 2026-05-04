@@ -21,7 +21,13 @@ from .content_understanding_client import AzureContentUnderstandingClient
 from .document_intelligence_client import AzureDocumentIntelligenceClient
 from .logging_config import get_logger
 from .token_utils import estimate_token_count
-from .utils import clean_extracted_markdown, extract_docx_as_markdown, check_document_protection
+from .utils import (
+    clean_extracted_markdown,
+    extract_docx_as_markdown,
+    check_document_protection,
+    get_pdf_page_count,
+    split_pdf_bytes,
+)
 
 load_dotenv()
 
@@ -34,6 +40,17 @@ class ExtractionService(str, Enum):
 
     CONTENT_UNDERSTANDING = "content_understanding"
     DOCUMENT_INTELLIGENCE = "document_intelligence"
+
+
+class OversizeStrategy(str, Enum):
+    """Strategy for handling documents that exceed CU page limits."""
+
+    CHUNKING = "chunking"
+    DI_FALLBACK = "di_fallback"
+
+
+# Azure Content Understanding maximum page count per request
+CU_MAX_PAGES = 300
 
 
 # Extensions that need local extraction because DI does not support them.
@@ -74,23 +91,31 @@ class DocumentProcessor:
     """
 
     def __init__(
-        self, service: ExtractionService = ExtractionService.CONTENT_UNDERSTANDING
+        self,
+        service: ExtractionService = ExtractionService.CONTENT_UNDERSTANDING,
+        oversize_strategy: OversizeStrategy = OversizeStrategy.CHUNKING,
     ):
         """
         Initialize the document processor with specified service.
 
         Args:
             service: The extraction service to use (default: Content Understanding)
+            oversize_strategy: Strategy when a PDF exceeds CU_MAX_PAGES
+                (default: split into chunks)
         """
         logger.info("Initializing DocumentProcessor with service: %s...", service.value)
         init_start = time.time()
 
         self.service = service
+        self.oversize_strategy = oversize_strategy
         self.cu_client: Optional[AzureContentUnderstandingClient] = None
         self.di_client: Optional[AzureDocumentIntelligenceClient] = None
 
         if service == ExtractionService.CONTENT_UNDERSTANDING:
             self._init_content_understanding()
+            # Also initialize DI client if fallback strategy is selected
+            if oversize_strategy == OversizeStrategy.DI_FALLBACK:
+                self._init_document_intelligence()
         else:
             self._init_document_intelligence()
 
@@ -218,6 +243,33 @@ class DocumentProcessor:
 
         # Use the configured extraction service
         if self.service == ExtractionService.CONTENT_UNDERSTANDING:
+            # Check page count for PDFs — CU has a 300-page limit
+            if extension == "pdf":
+                page_count = get_pdf_page_count(file_bytes)
+                if page_count > CU_MAX_PAGES:
+                    logger.warning(
+                        "[REQ:%s] Document has %d pages (limit: %d) — "
+                        "applying oversize strategy: %s",
+                        request_id,
+                        page_count,
+                        CU_MAX_PAGES,
+                        self.oversize_strategy.value,
+                    )
+                    content = await self._handle_oversize_pdf(
+                        file_bytes, request_id, page_count
+                    )
+                    duration = time.time() - extract_start
+                    content_tokens = estimate_token_count(content)
+                    logger.info(
+                        "[REQ:%s] ✅ Oversize document extraction completed in %.3fs "
+                        "(%d chars, ~%d tokens)",
+                        request_id,
+                        duration,
+                        len(content),
+                        content_tokens,
+                    )
+                    return content
+
             logger.info(
                 "[REQ:%s] Processing with Azure Content Understanding (format: %s)...",
                 request_id,
@@ -246,6 +298,60 @@ class DocumentProcessor:
             content_tokens,
         )
         return content
+
+    async def _handle_oversize_pdf(
+        self, file_bytes: bytes, request_id: str, page_count: int
+    ) -> str:
+        """Handle a PDF that exceeds CU_MAX_PAGES using the configured strategy.
+
+        Args:
+            file_bytes: The full PDF document as bytes.
+            request_id: Unique request ID for logging correlation.
+            page_count: Total number of pages in the document.
+
+        Returns:
+            Extracted content as markdown string.
+        """
+        import asyncio
+
+        if self.oversize_strategy == OversizeStrategy.DI_FALLBACK:
+            # Fall back to Document Intelligence (supports up to 2000 pages)
+            logger.info(
+                "[REQ:%s] Falling back to Document Intelligence for %d-page document",
+                request_id,
+                page_count,
+            )
+            if not self.di_client:
+                self._init_document_intelligence()
+            return await self.di_client.analyze_document_async(file_bytes, request_id)
+
+        # Chunking strategy: split the PDF and process each chunk with CU
+        logger.info(
+            "[REQ:%s] Splitting %d-page PDF into chunks of %d pages",
+            request_id,
+            page_count,
+            CU_MAX_PAGES,
+        )
+        chunks = await asyncio.to_thread(split_pdf_bytes, file_bytes, CU_MAX_PAGES)
+        logger.info(
+            "[REQ:%s] Split into %d chunk(s), processing sequentially...",
+            request_id,
+            len(chunks),
+        )
+
+        markdown_parts: list[str] = []
+        for idx, chunk_bytes in enumerate(chunks, start=1):
+            chunk_id = f"{request_id}-chunk{idx}"
+            logger.info(
+                "[REQ:%s] Processing chunk %d/%d...", request_id, idx, len(chunks)
+            )
+            chunk_content = await asyncio.to_thread(
+                self._analyze_with_content_understanding, chunk_bytes, chunk_id
+            )
+            markdown_parts.append(chunk_content)
+
+        # Join chunks with a separator
+        return "\n\n---\n\n".join(markdown_parts)
 
     def _analyze_with_content_understanding(
         self, file_bytes: bytes, request_id: str = "unknown"

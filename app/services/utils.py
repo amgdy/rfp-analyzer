@@ -188,6 +188,56 @@ def check_document_protection(file_bytes: bytes, filename: str) -> None:
             pass
 
 
+def get_pdf_page_count(file_bytes: bytes) -> int:
+    """Return the number of pages in a PDF file.
+
+    Args:
+        file_bytes: Raw PDF content.
+
+    Returns:
+        Page count, or 0 if the file cannot be parsed.
+    """
+    try:
+        from pypdf import PdfReader
+
+        reader = PdfReader(io.BytesIO(file_bytes))
+        return len(reader.pages)
+    except Exception:
+        return 0
+
+
+def split_pdf_bytes(file_bytes: bytes, max_pages: int) -> list[bytes]:
+    """Split a PDF into chunks of at most *max_pages* pages.
+
+    Each chunk is returned as a standalone PDF (bytes).
+
+    Args:
+        file_bytes: The full PDF document as bytes.
+        max_pages: Maximum pages per chunk.
+
+    Returns:
+        A list of PDF byte-strings, each containing ≤ max_pages pages.
+    """
+    from pypdf import PdfReader, PdfWriter
+
+    reader = PdfReader(io.BytesIO(file_bytes))
+    total_pages = len(reader.pages)
+
+    if total_pages <= max_pages:
+        return [file_bytes]
+
+    chunks: list[bytes] = []
+    for start in range(0, total_pages, max_pages):
+        writer = PdfWriter()
+        for page_idx in range(start, min(start + max_pages, total_pages)):
+            writer.add_page(reader.pages[page_idx])
+        buf = io.BytesIO()
+        writer.write(buf)
+        chunks.append(buf.getvalue())
+
+    return chunks
+
+
 def extract_docx_as_markdown(file_bytes: bytes) -> str:
     """Extract content from a DOCX file as markdown text.
 

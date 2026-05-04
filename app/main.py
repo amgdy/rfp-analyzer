@@ -23,7 +23,7 @@ from services.telemetry import setup_telemetry, _get_app_version
 
 setup_telemetry()
 
-from services.document_processor import ExtractionService
+from services.document_processor import ExtractionService, OversizeStrategy
 from services.blob_storage_client import is_valid_session_id
 
 # Import UI modules
@@ -105,6 +105,8 @@ if "step_durations" not in st.session_state:
     st.session_state.step_durations = {}
 if "extraction_service" not in st.session_state:
     st.session_state.extraction_service = ExtractionService.DOCUMENT_INTELLIGENCE
+if "oversize_strategy" not in st.session_state:
+    st.session_state.oversize_strategy = OversizeStrategy.CHUNKING
 if "evaluation_mode" not in st.session_state:
     st.session_state.evaluation_mode = "individual"
 if "global_criteria" not in st.session_state:
@@ -193,6 +195,11 @@ def _restore_session_from_blob(session_id: str):
                 logger.warning("Unknown extraction service in saved state: %s", config["extraction_service"])
         if config.get("reasoning_effort"):
             st.session_state.reasoning_effort = config["reasoning_effort"]
+        if config.get("oversize_strategy"):
+            try:
+                st.session_state.oversize_strategy = OversizeStrategy(config["oversize_strategy"])
+            except ValueError:
+                logger.warning("Unknown oversize strategy in saved state: %s", config["oversize_strategy"])
         if config.get("global_criteria"):
             st.session_state.global_criteria = config["global_criteria"]
 

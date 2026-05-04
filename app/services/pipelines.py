@@ -5,7 +5,7 @@ These async functions are used by both main.py and the UI step modules.
 
 import os
 import time
-from .document_processor import DocumentProcessor, ExtractionService
+from .document_processor import DocumentProcessor, ExtractionService, OversizeStrategy
 from .scoring_agent import (
     ScoringAgent,
     CriteriaExtractionAgent,
@@ -26,6 +26,7 @@ async def process_document(
     file_bytes: bytes,
     filename: str,
     extraction_service: ExtractionService = ExtractionService.DOCUMENT_INTELLIGENCE,
+    oversize_strategy: OversizeStrategy = OversizeStrategy.CHUNKING,
 ) -> tuple[str, float]:
     """Process uploaded document using the configured extraction service.
 
@@ -33,6 +34,7 @@ async def process_document(
         file_bytes: Document content as bytes
         filename: Original filename
         extraction_service: Which service to use for extraction
+        oversize_strategy: Strategy for oversized PDFs when using Content Understanding
 
     Returns:
         Tuple of (content, duration_seconds)
@@ -44,7 +46,10 @@ async def process_document(
         span.set_attribute("document.filename", filename)
         span.set_attribute("document.extraction_service", extraction_service.value)
 
-        processor = DocumentProcessor(service=extraction_service)
+        processor = DocumentProcessor(
+            service=extraction_service,
+            oversize_strategy=oversize_strategy,
+        )
         content = await processor.extract_content(file_bytes, filename)
 
         duration = time.time() - start_time
